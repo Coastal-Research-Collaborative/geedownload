@@ -113,7 +113,7 @@ def channel_name_to_band(channel_name, satname, reverse=False):
             raise ValueError(f"Invalid channel name '{channel_name}' for satellite '{satname}'")
 
 
-def retrieve_imagery(sitename, start_date, end_date, polygon=None, satnames=['L5', 'L7', 'L8', 'L9', 'S2']):
+def retrieve_imagery(sitename, start_date, end_date, download_folder=None, polygon=None, satnames=['L5', 'L7', 'L8', 'L9', 'S2']):
     """
     Download imagery for a given site (if no polygon loads sitename file)
 
@@ -126,7 +126,8 @@ def retrieve_imagery(sitename, start_date, end_date, polygon=None, satnames=['L5
 
     authenticate_and_initialize() # authenticate and initialize gee
 
-    download_folder = os.path.join('data', 'sat_images', sitename)
+    if download_folder is  None:
+        download_folder = os.path.join('data', 'sat_images', sitename)
     if not os.path.exists(download_folder): os.makedirs(download_folder)
 
     if polygon is None:
@@ -139,8 +140,8 @@ def retrieve_imagery(sitename, start_date, end_date, polygon=None, satnames=['L5
 
         
 
-    qa_band_Landsat = 'QA_PIXEL'
-    qa_band_S2 = 'QA60'
+    # qa_band_Landsat = 'QA_PIXEL'
+    # qa_band_S2 = 'QA60'
     sat_dict = {
         'L5': {'start_year': None, 'end_year': None, 'collection': 'LANDSAT/LT05/C02/T1_TOA'},
         'L7': {'start_year': None, 'end_year': 2022, 'collection': 'LANDSAT/LE07/C02/T1_TOA'},
