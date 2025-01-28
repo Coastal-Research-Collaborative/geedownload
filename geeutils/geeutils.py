@@ -132,13 +132,18 @@ def retrieve_imagery(sitename, start_date, end_date, data_dir=None, polygon=None
     if data_dir is  None:
         download_folder = os.path.join('data', 'sat_images', sitename)
     else:
-        download_folder = os.path.join(data_dir, sitename)
+        download_folder = os.path.join(data_dir, 'sat_images', sitename)
     if not os.path.exists(download_folder): os.makedirs(download_folder)
 
     if polygon is None:
         # load from siteinfo
         # NOTE depending on the use case this structure may not be set up
-        with open(os.path.join('siteinfo', sitename, f'{sitename}_polygon.geojson'), 'r') as file: geojson_data = geojson.load(file)
+        polygon_path = os.path.join('siteinfo', sitename, f'{sitename}_polygon.geojson')
+        if not os.path.exists(polygon_path):
+            polygon_path = os.path.join(data_dir, 'siteinfo', sitename, f'{sitename}_polygon.geojson')
+        if not os.path.exists(polygon_path):
+            raise('There is no polygon geojsonfiles in siteinfo/<sitename>/<sitename>_polygon.geojson or data/siteinfo/<sitename>/<sitename>_polygon.geojson')
+        with open(polygon_path, 'r') as file: geojson_data = geojson.load(file)
         coords = geojson_data["features"][0]["geometry"]['coordinates'][0]
         polygon = [[coord[0], coord[1]] for coord in coords]  # Keep only lat, lon
 
