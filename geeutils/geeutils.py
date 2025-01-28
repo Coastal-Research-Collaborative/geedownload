@@ -115,21 +115,24 @@ def channel_name_to_band(channel_name, satname, reverse=False):
             raise ValueError(f"Invalid channel name '{channel_name}' for satellite '{satname}'")
 
 
-def retrieve_imagery(sitename, start_date, end_date, download_folder=None, polygon=None, satnames=['L5', 'L7', 'L8', 'L9', 'S2']):
+def retrieve_imagery(sitename, start_date, end_date, data_dir=None, polygon=None, satnames=['L5', 'L7', 'L8', 'L9', 'S2']):
     """
     Download imagery for a given site (if no polygon loads sitename file)
 
     :param sitename: str the name of the site (used for where the images are downloaded)
     :param start_date: str "YYY-MM-DD" 
     :param end_date: str "YYY-MM-DD" 
+    :param data_dir: str directory where the folder (named sitename should be placed)
     :param polygon: 2d list [longitude1, latitude1], [longitude2, latitude2], [longitude3, latitude3], [longitude4, latitude4]] NOTE does not need to be a rectangle
     :param satnames: list of strs the names of the satellites that we want to download imagery from
     """
 
     authenticate_and_initialize() # authenticate and initialize gee
 
-    if download_folder is  None:
+    if data_dir is  None:
         download_folder = os.path.join('data', 'sat_images', sitename)
+    else:
+        download_folder = os.path.join(data_dir, sitename)
     if not os.path.exists(download_folder): os.makedirs(download_folder)
 
     if polygon is None:
