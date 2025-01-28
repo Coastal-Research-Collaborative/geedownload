@@ -10,7 +10,9 @@ from glob import glob
 import ee
 import geojson
 import requests
-import zipfile
+import zipfile 
+import json
+import numpy as np
 
 
 
@@ -132,6 +134,7 @@ def retrieve_imagery(sitename, start_date, end_date, download_folder=None, polyg
 
     if polygon is None:
         # load from siteinfo
+        # NOTE depending on the use case this structure may not be set up
         with open(os.path.join('siteinfo', sitename, f'{sitename}_polygon.geojson'), 'r') as file: geojson_data = geojson.load(file)
         coords = geojson_data["features"][0]["geometry"]['coordinates'][0]
         polygon = [[coord[0], coord[1]] for coord in coords]  # Keep only lat, lon
@@ -244,3 +247,53 @@ def retrieve_imagery(sitename, start_date, end_date, download_folder=None, polyg
                         print(f"Failed to download file. Status code: {response.status_code}")
             else:
                 print(f"No images found for {satname} in the given date range and polygon.")
+
+
+def create_polygon_geojson(sitename:str, coords:list):
+    """
+    Given a list of lat long coordinates this creates a polygon function used in the imagery download process
+    """
+    if coords[0] != coords[-1]:
+        coords.append(coords[0])  # Close the polygon by repeating the first coordinate
+
+
+    geojson_data = {
+        "type": "FeatureCollection",
+        "name": f"{sitename}_polygon",
+        "crs": {
+            "type": "name",
+            "properties": {"name": "urn:ogc:def:crs:OGC:1.3:CRS84"}
+        },
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {
+                    "Name": "Polygon 1",
+                    "description": None,
+                    "timestamp": None,
+                    "begin": None,
+                    "end": None,
+                    "altitudeMode": None,
+                    "tessellate": -1,
+                    "extrude": 0,
+                    "visibility": -1,
+                    "drawOrder": None,
+                    "icon": None
+                },
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [coords]
+                }
+            }
+        ]
+    }
+
+    save_dir = os.path.join('siteinfo', sitename)
+    if not os.path.exists(save_dir): 
+        os.makedirs(save_dir)
+    
+    save_path = os.path.join(save_dir, f"{sitename}_polygon.geojson")
+    
+    with open(save_path, 'w') as geojson_file:
+        json.dump(geojson_data, geojson_file, indent=4)
+

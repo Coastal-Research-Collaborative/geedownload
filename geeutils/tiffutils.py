@@ -462,6 +462,31 @@ def remove_duplicate_band_files(fns, timestamp=None):
     return fns_filtered
 
 
+def del_leftover_band_files(data_dir):
+    """
+    This function deletes left over single band files from the gee downloaded images
+
+    sometimes there are permission errors with eleting in tiffutils.combine_tiffs() and in that case restart enve and run this
+    """
+    tiff_files = glob(os.path.join(data_dir, '*', '*.tif')) # the * for dir is the say name folder
+    for tiff_fn in tiff_files:
+        delete = False
+        if '.R.tif' in tiff_fn:
+            delete = True
+        if '.G.tif' in tiff_fn:
+            delete = True
+        if '.B.tif' in tiff_fn:
+            delete = True
+        if '.NIR.tif' in tiff_fn:
+            delete = True
+        if '.PAN.tif' in tiff_fn:
+            delete = True
+        if '.UDM.tif' in tiff_fn:
+            delete = True
+        
+        if delete:
+            os.remove(tiff_fn)
+
 
 def clean_up_gee_downloads(data_dir):
 
@@ -491,29 +516,5 @@ def clean_up_gee_downloads(data_dir):
             resample = True
             if satname.startswith('S'): resample = False # just resample for landsat (not for sentinel images)
             combine_tiffs(fns, output_path=save_path, scale=False, resample=resample)
-
-
-def del_leftover_band_files(data_dir):
-    """
-    This function deletes left over single band files from the gee downloaded images
-
-    sometimes there are permission errors with eleting in tiffutils.combine_tiffs() and in that case restart enve and run this
-    """
-    tiff_files = glob(os.path.join(data_dir, '*', '*.tif')) # the * for dir is the say name folder
-    for tiff_fn in tiff_files:
-        delete = False
-        if '.R.tif' in tiff_fn:
-            delete = True
-        if '.G.tif' in tiff_fn:
-            delete = True
-        if '.B.tif' in tiff_fn:
-            delete = True
-        if '.NIR.tif' in tiff_fn:
-            delete = True
-        if '.PAN.tif' in tiff_fn:
-            delete = True
-        if '.UDM.tif' in tiff_fn:
-            delete = True
         
-        if delete:
-            os.remove(tiff_fn)
+    del_leftover_band_files(data_dir)
