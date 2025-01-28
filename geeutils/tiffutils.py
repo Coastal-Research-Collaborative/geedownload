@@ -201,12 +201,14 @@ def combine_tiffs(tiff_files:list, output_path:str, delete_original_files:bool=T
     output_dataset.SetProjection(ref_dataset.GetProjection())
 
     # write each file (band) as a separate layer in the output dataset
+    band_descriptions = ['Red', 'Green', 'Blue', 'NIR', 'UDM']
     for idx, ds in enumerate(datasets, start=1):
         band_data = ds.GetRasterBand(1).ReadAsArray()
         if scale:
             band_data = scale_band(band_data)
         output_band = output_dataset.GetRasterBand(idx)
         output_band.WriteArray(band_data)
+        output_band.SetDescription(band_descriptions[idx])
 
     # close datasets to release resources -------------------------------------------------
     output_dataset.FlushCache()
