@@ -208,7 +208,7 @@ def combine_tiffs(tiff_files:list, output_path:str, delete_original_files:bool=T
         output_band = output_dataset.GetRasterBand(idx)
         output_band.WriteArray(band_data)
 
-    # close datasets to release resources
+    # close datasets to release resources -------------------------------------------------
     output_dataset.FlushCache()
     output_dataset = None  # close output file
     for ds in datasets:
