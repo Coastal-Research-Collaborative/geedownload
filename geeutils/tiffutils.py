@@ -64,19 +64,21 @@ def scale_band(image_band, satname:str=None):
         else:
             image_band = np.zeros_like(image_band)  # return all zeros if constant
     else:
-        # Do a scaling specific to 
-        # NOTE Needs to be implemented so for now just same
+        # Do a scaling specific to different satellites
         if satname == 'S2':
-            image_band = image_band/10_000
-        image_band_temp = np.nan_to_num(image_band, nan=0, posinf=0, neginf=0)
-        min_val = np.min(image_band_temp)
-        max_val = np.max(image_band_temp)
-        image_band = np.nan_to_num(image_band, nan=0, posinf=max_val, neginf=min_val)
-
-        if max_val != min_val:
-            image_band = (image_band - min_val) / (max_val - min_val)
+            image_band = image_band / 10_000 # this is what the imagery is natively scaled to 
         else:
-            image_band = np.zeros_like(image_band)  # return all zeros if constant
+            # NOTE for now this is the landsat satellites
+            image_band_temp = np.nan_to_num(image_band, nan=0, posinf=0, neginf=0)
+            min_val = np.min(image_band_temp)
+            max_val = np.max(image_band_temp)
+            print(f'pre scaling min={min_val} max={max_val}')
+            image_band = np.nan_to_num(image_band, nan=0, posinf=max_val, neginf=min_val)
+
+            if max_val != min_val:
+                image_band = (image_band - min_val) / (max_val - min_val)
+            else:
+                image_band = np.zeros_like(image_band)  # return all zeros if constant
     print('Is there somehow still infs?')
     print(np.min(image_band))
     print(np.max(image_band))
@@ -150,12 +152,12 @@ def combine_tiffs(tiff_files:list, output_path:str, delete_original_files:bool=T
 
     datasets_dict_list = [{'filename': tiff, 'dataset': gdal.Open(tiff)} for tiff in tiff_files]
 
-    # Iterate through the list and print out the details
-    for item in datasets_dict_list:
-        if item['dataset'] is not None:
-            print(f"Filename: {item['filename']}, Dataset: {item['dataset']}")
-        else:
-            print(f"Filename: {item['filename']} - Dataset is None (null)")
+    # # Iterate through the list and print out the details
+    # for item in datasets_dict_list:
+    #     if item['dataset'] is not None:
+    #         print(f"Filename: {item['filename']}, Dataset: {item['dataset']}")
+    #     else:
+    #         print(f"Filename: {item['filename']} - Dataset is None (null)")
 
     
     if resample:
