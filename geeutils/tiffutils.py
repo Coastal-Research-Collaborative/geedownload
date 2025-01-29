@@ -67,21 +67,14 @@ def scale_band(image_band, satname:str=None):
         # Do a scaling specific to different satellites
         if satname == 'S2':
             image_band = image_band / 10_000 # this is what the imagery is natively scaled to 
+            image_band = np.clip(image_band, 0, 1) # make sure values are between 0 and 1 (they should be this is a "just in case")
         else:
             # NOTE for now this is the landsat satellites
-            image_band_temp = np.nan_to_num(image_band, nan=0, posinf=0, neginf=0)
-            min_val = np.min(image_band_temp)
-            max_val = np.max(image_band_temp)
-            print(f'pre scaling min={min_val} max={max_val}')
-            image_band = np.nan_to_num(image_band, nan=0, posinf=max_val, neginf=min_val)
-
-            if max_val != min_val:
-                image_band = (image_band - min_val) / (max_val - min_val)
-            else:
-                image_band = np.zeros_like(image_band)  # return all zeros if constant
-    print('Is there somehow still infs?')
-    print(np.min(image_band))
-    print(np.max(image_band))
+            # landsat imagery is already between 0 and 1 but does have some inf values so just replaces these 
+            image_band = np.nan_to_num(image_band, nan=0, posinf=1, neginf=0)
+            # print('test doing nothing')
+            
+    
     return image_band
 
 
