@@ -47,21 +47,39 @@ def load_tiff_image(fn, plot=False, plot_scale=1):
         return(image_transposed)
 
 
-def scale_band(image_band):
+def scale_band(image_band, satname:str=None):
     """
-    Scales images between 0 and 1
+    if no sat name scales images between 0 and 1
+    else: scales specific to a value for the given sat (then clips)
     """
+    if satname is None:
+        # Just min/max scale
+        image_band_temp = np.nan_to_num(image_band, nan=0, posinf=0, neginf=0)
+        min_val = np.min(image_band_temp)
+        max_val = np.max(image_band_temp)
+        image_band = np.nan_to_num(image_band, nan=0, posinf=max_val, neginf=min_val)
 
-    image_band_temp = np.nan_to_num(image_band, nan=0, posinf=0, neginf=0)
-    min_val = np.min(image_band_temp)
-    max_val = np.max(image_band_temp)
-    image_band = np.nan_to_num(image_band, nan=0, posinf=max_val, neginf=min_val)
-
-    if max_val != min_val:
-        image_band = (image_band - min_val) / (max_val - min_val)
+        if max_val != min_val:
+            image_band = (image_band - min_val) / (max_val - min_val)
+        else:
+            image_band = np.zeros_like(image_band)  # return all zeros if constant
     else:
-        image_band = np.zeros_like(image_band)  # return all zeros if constant
+        # Do a scaling specific to 
+        # NOTE Needs to be implemented so for now just same
+        if satname == 'S2':
+            image_band = image_band/10_000
+        image_band_temp = np.nan_to_num(image_band, nan=0, posinf=0, neginf=0)
+        min_val = np.min(image_band_temp)
+        max_val = np.max(image_band_temp)
+        image_band = np.nan_to_num(image_band, nan=0, posinf=max_val, neginf=min_val)
 
+        if max_val != min_val:
+            image_band = (image_band - min_val) / (max_val - min_val)
+        else:
+            image_band = np.zeros_like(image_band)  # return all zeros if constant
+    print('Is there somehow still infs?')
+    print(np.min(image_band))
+    print(np.max(image_band))
     return image_band
 
 
@@ -209,11 +227,7 @@ def combine_tiffs(tiff_files:list, output_path:str, delete_original_files:bool=T
 
     # write each file (band) as a separate layer in the output dataset
     band_descriptions = ['Red', 'Green', 'Blue', 'NIR', 'UDM']
-    print('what the what the')
-    print(datasets)
     for idx, ds in enumerate(datasets, start=1):
-        print(ds)
-        print(idx)
         band_data = ds.GetRasterBand(1).ReadAsArray()
         if scale:
             band_data = scale_band(band_data)
@@ -528,6 +542,6 @@ def clean_up_gee_downloads(data_dir):
             save_path = os.path.join(data_dir, satname, f'{satname}_{timestamp_str}.tif') # this gets rid of the LC08 or what ever other weird addition there is in the data
             resample = True
             if satname.startswith('S'): resample = False # just resample for landsat (not for sentinel images)
-            combine_tiffs(fns, output_path=save_path, scale=False, resample=resample)
+            combine_tiffs(fns, output_path=save_path, scale=True, resample=resample)
         
     del_leftover_band_files(data_dir)
