@@ -178,12 +178,11 @@ def retrieve_imagery(sitename, start_date, end_date, data_dir=None, polygon=None
             collection = (ee.ImageCollection(sat_info['collection'])
                           .filterDate(start_date, end_date)
                           .filterBounds(aoi))
-            print(collection)
             # Check if the collection is not empty
             try:
                 n_images = collection.size().getInfo()
             except ee.ee_exception.EEException as e:
-                n_images = 0
+                n_images = 0 # if n_images = 0 (it will print out that this is because there are no images avaible)
             if n_images > 0:
                 for image in collection.getInfo()['features']:
                     image_id = image['id']  # Get the ID of the image to download

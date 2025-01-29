@@ -22,13 +22,20 @@ def load_tiff_image(fn, plot=False, plot_scale=1):
         # print(f"Image shape: {image_transposed.shape}")
 
         if plot:
+            min_val_rgb = image_transposed[:,:,:3].min()
+            max_val_rgb = image_transposed[:,:,:3].max()
+            min_val_nir = image_transposed[:,:,3].min()
+            max_val_nir = image_transposed[:,:,3].max()
+            min_val_udm = image_transposed[:,:,4].min()
+            max_val_udm = image_transposed[:,:,4].max()
+
             fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(10, 20))
             axes[0].imshow(image_transposed[:,:,[0,1,2]]/plot_scale)
-            axes[0].set_title(f'{os.path.basename(fn)}, {image_transposed.shape}')
+            axes[0].set_title(f'{os.path.basename(fn)}, {image_transposed.shape}\nRGB min: {min_val_rgb}, max: {max_val_rgb}')
             axes[1].imshow(image_transposed[:,:,3]/plot_scale) # near infrared
-            axes[1].set_title('NIR')
+            axes[1].set_title(f'NIR min: {min_val_nir}, max: {max_val_nir}')
             axes[2].imshow(image_transposed[:,:,4])
-            axes[2].set_title('UDM')
+            axes[2].set_title(f'UDM min: {min_val_udm}, max: {max_val_udm}')
             
             fig.show()
             plt.show()
