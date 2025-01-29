@@ -99,7 +99,7 @@ def create_rgb_image(red_image, green_image, blue_image, scale=False):
 
 
 
-def combine_tiffs(tiff_files:list, output_path:str, delete_original_files:bool=True, resample:bool=True, scale:bool=True):
+def combine_tiffs(tiff_files:list, output_path:str, satname=None, delete_original_files:bool=True, resample:bool=True, scale:bool=True):
     """
     This function gets the min and max pixel boundaries of a dataset
 
@@ -109,6 +109,8 @@ def combine_tiffs(tiff_files:list, output_path:str, delete_original_files:bool=T
         list of tiff filenames
     output_path : str
         path to where the output combined tiff will be saved
+    satname : 
+        None which mean it does generic minmax scaling but otherwise it does /10_000 for S2 (sentinel) and 
     delete_original_files : bool
         if True, then the single band files that were used to make the combined tiff will be delete
     resample : bool
@@ -225,7 +227,7 @@ def combine_tiffs(tiff_files:list, output_path:str, delete_original_files:bool=T
     for idx, ds in enumerate(datasets, start=1):
         band_data = ds.GetRasterBand(1).ReadAsArray()
         if scale:
-            band_data = scale_band(band_data)
+            band_data = scale_band(band_data, satname=satname)
         output_band = output_dataset.GetRasterBand(idx)
         output_band.WriteArray(band_data)
         output_band.SetDescription(band_descriptions[idx-1]) # NOTE because enumerator starts at 1
@@ -537,6 +539,6 @@ def clean_up_gee_downloads(data_dir):
             save_path = os.path.join(data_dir, satname, f'{satname}_{timestamp_str}.tif') # this gets rid of the LC08 or what ever other weird addition there is in the data
             resample = True
             if satname.startswith('S'): resample = False # just resample for landsat (not for sentinel images)
-            combine_tiffs(fns, output_path=save_path, scale=True, resample=resample)
+            combine_tiffs(fns, output_path=save_path, satname=satname, scale=True, resample=resample)
         
     del_leftover_band_files(data_dir)
