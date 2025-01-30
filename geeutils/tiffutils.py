@@ -66,8 +66,9 @@ def scale_band(image_band, satname:str=None):
     else:
         # Do a scaling specific to different satellites
         if satname == 'S2':
-            image_band = image_band / 10_000 # this is what the imagery is natively scaled to 
-            image_band = np.clip(image_band, 0, 1) # make sure values are between 0 and 1 (they should be this is a "just in case")
+            # image_band = image_band / 10_000 # this is what the imagery is natively scaled to 
+            # image_band = np.clip(image_band, 0, 1) # make sure values are between 0 and 1 (they should be this is a "just in case")
+            image_band = image_band # do nothing for now (maybe make it same as else)
         else:
             # NOTE for now this is the landsat satellites
             # landsat imagery is already between 0 and 1 but does have some inf values so just replaces these 
