@@ -252,9 +252,6 @@ def retrieve_imagery(sitename, start_date, end_date, data_dir=None, polygon=None
                             if not file_path == new_filename: os.rename(file_path, new_filename) # NOTE done by resampling for landsay
 
                         os.remove(zip_filename) # remove zip file
-
-
-
                     else:
                         print(f"Failed to download file. Status code: {response.status_code}")
             else:
