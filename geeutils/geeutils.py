@@ -238,6 +238,7 @@ def retrieve_imagery(sitename, start_date, end_date, data_dir=None, polygon=None
                             print(file_path)
                             short_fn = os.path.basename(file_path)
                             print(short_fn)
+                            print(short_fn)
                             period_split = short_fn.split('.')
                             band = period_split[1] # last one is file extention
                             short_fn_no_band = period_split[0] # removes extention and band
