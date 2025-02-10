@@ -212,7 +212,6 @@ def retrieve_imagery(sitename, start_date, end_date, data_dir=None, polygon=None
                         download_folder_satname = os.path.join('data', 'sat_images', sitename, satname) # sitename dir was already made
                         if not os.path.exists(download_folder_satname): os.makedirs(download_folder_satname)
 
-
                         # Modify the zip filename to include the satname at the beginning and avoid nested folders
                         image_id_fn = image_id.split("/")[-1]
                         zip_filename = os.path.join(download_folder_satname, f'{image_id_fn}_image.zip')
@@ -237,18 +236,16 @@ def retrieve_imagery(sitename, start_date, end_date, data_dir=None, polygon=None
                             if file_path.endswith('.zip'): continue
                             print(file_path)
                             short_fn = os.path.basename(file_path)
-                            print(short_fn)
-                            print(short_fn)
+                            # print(short_fn)
                             period_split = short_fn.split('.')
                             band = period_split[1] # last one is file extention
                             short_fn_no_band = period_split[0] # removes extention and band
-                            print(band)
+                            # print(band)
                             short_fn = f'{short_fn_no_band}.{channel_name_to_band(channel_name=band, satname=satname, reverse=True)}'
-                            print(short_fn)
+                            # print(short_fn)
 
                             new_filename = os.path.join(os.path.dirname(file_path), f"{satname}_{short_fn}.tif")
 
-                            
                             if not file_path == new_filename: os.rename(file_path, new_filename) # NOTE done by resampling for landsay
 
                         os.remove(zip_filename) # remove zip file
