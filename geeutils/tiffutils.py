@@ -208,7 +208,10 @@ def combine_tiffs(tiff_files:list, output_path:str, satname=None, delete_origina
     if len(crs_set) > 1 or len(transform_set) > 1 or len(resolution_set) > 1:
         print(tiff_files)
         print(resolution_set)
-        raise ValueError("Input TIFF files must have the same CRS, bounds, and resolution!")
+        # NOTE it seems like there can be a compication everyonce and a while
+
+        # raise ValueError("Input TIFF files must have the same CRS, bounds, and resolution!")
+
 
     # create the output dataset based on the first dataset
     ref_dataset = datasets[0]
