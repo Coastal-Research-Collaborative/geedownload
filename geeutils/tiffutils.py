@@ -209,36 +209,39 @@ def combine_tiffs(tiff_files:list, output_path:str, satname=None, delete_origina
         print(tiff_files)
         print(resolution_set)
         # NOTE it seems like there can be a compication everyonce and a while
-
+        # NOTE so for now just delete all the files for it an skip that
+        print('deleteing these files because resolutions dont match for the different bands')
         # raise ValueError("Input TIFF files must have the same CRS, bounds, and resolution!")
+    else:
+        # NOTE for now only do this if the resolutions are the same
+        # create the output dataset based on the first dataset
+        ref_dataset = datasets[0]
+        driver = gdal.GetDriverByName("GTiff")
+        output_dataset = driver.Create(
+            output_path,
+            ref_dataset.RasterXSize,
+            ref_dataset.RasterYSize,
+            len(tiff_files),  # Number of layers
+            ref_dataset.GetRasterBand(1).DataType,
+        )
+        output_dataset.SetGeoTransform(ref_dataset.GetGeoTransform())
+        output_dataset.SetProjection(ref_dataset.GetProjection())
 
+        # write each file (band) as a separate layer in the output dataset
+        band_descriptions = ['Red', 'Green', 'Blue', 'NIR', 'UDM']
+        for idx, ds in enumerate(datasets, start=1):
+            band_data = ds.GetRasterBand(1).ReadAsArray()
+            if scale:
+                band_data = scale_band(band_data, satname=satname)
+            output_band = output_dataset.GetRasterBand(idx)
+            output_band.WriteArray(band_data)
+            output_band.SetDescription(band_descriptions[idx-1]) # NOTE because enumerator starts at 1
 
-    # create the output dataset based on the first dataset
-    ref_dataset = datasets[0]
-    driver = gdal.GetDriverByName("GTiff")
-    output_dataset = driver.Create(
-        output_path,
-        ref_dataset.RasterXSize,
-        ref_dataset.RasterYSize,
-        len(tiff_files),  # Number of layers
-        ref_dataset.GetRasterBand(1).DataType,
-    )
-    output_dataset.SetGeoTransform(ref_dataset.GetGeoTransform())
-    output_dataset.SetProjection(ref_dataset.GetProjection())
-
-    # write each file (band) as a separate layer in the output dataset
-    band_descriptions = ['Red', 'Green', 'Blue', 'NIR', 'UDM']
-    for idx, ds in enumerate(datasets, start=1):
-        band_data = ds.GetRasterBand(1).ReadAsArray()
-        if scale:
-            band_data = scale_band(band_data, satname=satname)
-        output_band = output_dataset.GetRasterBand(idx)
-        output_band.WriteArray(band_data)
-        output_band.SetDescription(band_descriptions[idx-1]) # NOTE because enumerator starts at 1
-
+        # close datasets to release resources -------------------------------------------------
+        output_dataset.FlushCache()
+        output_dataset = None  # close output file
+       
     # close datasets to release resources -------------------------------------------------
-    output_dataset.FlushCache()
-    output_dataset = None  # close output file
     for ds in datasets:
         ds.FlushCache()
         ds = None  # close input files
@@ -246,7 +249,6 @@ def combine_tiffs(tiff_files:list, output_path:str, satname=None, delete_origina
 
     del datasets
     gc.collect() # this is neccesary to avoid permission issue with deleting original file
-
 
     if delete_original_files:
         for tiff in tiff_files:
