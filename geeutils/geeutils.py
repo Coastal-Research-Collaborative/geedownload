@@ -255,7 +255,7 @@ def retrieve_imagery(sitename, start_date, end_date, data_dir=None, polygon=None
                 print(f"No images found for {satname} in the given date range and polygon.")
 
 
-def create_polygon_geojson(sitename:str, coords:list):
+def create_polygon_geojson(sitename:str, coords:list, data_dir:str='data'):
     """
     Given a list of lat long coordinates this creates a polygon function used in the imagery download process
     """
@@ -294,7 +294,7 @@ def create_polygon_geojson(sitename:str, coords:list):
         ]
     }
 
-    save_dir = os.path.join('siteinfo', sitename)
+    save_dir = os.path.join(data_dir, 'siteinfo', sitename)
     if not os.path.exists(save_dir): 
         os.makedirs(save_dir)
     
