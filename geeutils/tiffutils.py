@@ -200,19 +200,28 @@ def combine_tiffs(tiff_files:list, output_path:str, satname=None, delete_origina
                 print(f"Dataset at index {i} has a different GeoTransform: {ds.GetGeoTransform()}")
                 print(datasets_dict_list[i]['filename'])
 
-
     resolution_set = {
         (abs(ds.GetGeoTransform()[1]), abs(ds.GetGeoTransform()[5])) for ds in datasets
     }
 
-    if len(crs_set) > 1 or len(transform_set) > 1 or len(resolution_set) > 1:
-        print(tiff_files)
-        print(resolution_set)
-        # NOTE it seems like there can be a compication everyonce and a while
-        # NOTE so for now just delete all the files for it an skip that
+    
+    create_combined_file = True
+    if len(resolution_set) > 1:
+        # NOTE the most common example of this is the udm band for sentinel imagery
+        resolution_dict = {
+            tiff_file: (abs(ds.GetGeoTransform()[1]), abs(ds.GetGeoTransform()[5]))
+            for tiff_file, ds in zip(tiff_files, datasets)
+        }
+
+        print("TIFF files with their resolutions:")
+        for file, res in resolution_dict.items():
+            print(f"{file}: {res}")
+
+        
         print('deleteing these files because resolutions dont match for the different bands')
         # raise ValueError("Input TIFF files must have the same CRS, bounds, and resolution!")
-    else:
+        create_combined_file = False # the different bands are different resolitions so just deleteing everything
+    if create_combined_file:
         # NOTE for now only do this if the resolutions are the same
         # create the output dataset based on the first dataset
         ref_dataset = datasets[0]
@@ -241,6 +250,8 @@ def combine_tiffs(tiff_files:list, output_path:str, satname=None, delete_origina
         output_dataset.FlushCache()
         output_dataset = None  # close output file
        
+
+    # this is done even if we cant combine the channels
     # close datasets to release resources -------------------------------------------------
     for ds in datasets:
         ds.FlushCache()
