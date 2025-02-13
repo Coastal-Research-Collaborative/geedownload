@@ -216,10 +216,25 @@ def combine_tiffs(tiff_files:list, output_path:str, satname=None, delete_origina
         for file, res in resolution_dict.items():
             print(f"{file}: {res}")
 
+        udm_index = next((i for i, item in enumerate(datasets_dict_list) if "UDM" in item["filename"]), None)
         
-        print('deleteing these files because resolutions dont match for the different bands')
-        # raise ValueError("Input TIFF files must have the same CRS, bounds, and resolution!")
-        create_combined_file = False # the different bands are different resolitions so just deleteing everything
+        if udm_index is not None:
+            print(f"Original UDM has a different resolution: {datasets_dict_list[udm_index]['filename']}")
+            
+            # Remove the UDM dataset from processing
+            datasets.pop(udm_index)
+
+            # Generate new UDM in memory
+            new_udm = generate_custom_udm(datasets)
+
+            # Replace the old UDM dataset with the new UDM
+            datasets_dict_list[udm_index]['dataset'] = None  # Remove old UDM
+            datasets.append(new_udm)  # Append new UDM array to datasets list
+        else:
+            # this means sum band besides the udm has a different resolution so either skip this or raise and error
+            print('deleteing these files because resolutions dont match for the different bands')
+            # raise ValueError("Input TIFF files must have the same CRS, bounds, and resolution!")
+            create_combined_file = False # the different bands are different resolitions so just deleteing everything
     if create_combined_file:
         # NOTE for now only do this if the resolutions are the same
         # create the output dataset based on the first dataset
@@ -422,8 +437,43 @@ def resample_in_memory(input_dataset:gdal.Dataset, target_dataset:gdal.Dataset, 
     return output_dataset
 
 
-# def generate_custom_udm(recerence_band_path, band_paths, output_udm_path)
+def generate_custom_udm(datasets):
+    """
+    Generate a UDM mask where pixels that are zero across all bands are set to 1 in UDM.
 
+    Args:
+        datasets (list of gdal.Dataset): List of in-memory datasets for bands (excluding original UDM).
+
+    Returns:
+        np.ndarray: Generated UDM mask.
+    """
+    # Read all bands into memory as numpy arrays
+    band_arrays = [ds.GetRasterBand(1).ReadAsArray() for ds in datasets if ds is not None]
+
+    # Stack bands into a 3D array: shape (bands, height, width)
+    band_stack = np.array(band_arrays)
+
+    # Generate UDM: Mark pixels where ALL bands are 0 as 1, else 0
+    udm_array = np.all(band_stack == 0, axis=0).astype(np.uint8)
+
+    # Get metadata from first dataset
+    ref_dataset = datasets[0]
+    cols, rows = ref_dataset.RasterXSize, ref_dataset.RasterYSize
+    geotransform = ref_dataset.GetGeoTransform()
+    projection = ref_dataset.GetProjection()
+
+    # Create an in-memory GDAL dataset
+    driver = gdal.GetDriverByName("MEM")
+    udm_dataset = driver.Create("", cols, rows, 1, gdal.GDT_Byte)  # 1-band UDM, Byte type
+
+    # Set metadata
+    udm_dataset.SetGeoTransform(geotransform)
+    udm_dataset.SetProjection(projection)
+
+    # Write UDM data to band
+    udm_dataset.GetRasterBand(1).WriteArray(udm_array)
+
+    return udm_dataset  # Now returns a proper GDAL dataset
 
 def plot_datasets(datasets_dict_list, pan_dataset_dict=None):
     ncols = len(datasets_dict_list) 
