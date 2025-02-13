@@ -169,12 +169,20 @@ def retrieve_imagery(sitename, start_date, end_date, data_dir=None, polygon=None
                 channel_name_to_band('R', satname), 
                 channel_name_to_band('G', satname), 
                 channel_name_to_band('B', satname), 
-                channel_name_to_band('NIR', satname),
-                channel_name_to_band('UDM', satname)
+                channel_name_to_band('NIR', satname)#,
+                # channel_name_to_band('UDM', satname) # NOTE dont want this for everytyhing because sentinel has wrong shape
             ]
             if not 'S' in satname:
+                # NOTE for sentinel the udm is like 8.99 m resolution while the rest is 10 m so explicitly ask for it in 10 m
+                bands.append(channel_name_to_band('UDM', satname)) # landsat the udm should be in the right resolution naturally
                 bands.append(channel_name_to_band('PAN', satname)) # only landsat imagery has pan chromatic band
+            
+            
+            print('These are the bands----------------------------------------')
+            print(bands)
+
                 
+
             collection = (ee.ImageCollection(sat_info['collection'])
                           .filterDate(start_date, end_date)
                           .filterBounds(aoi))
@@ -196,6 +204,19 @@ def retrieve_imagery(sitename, start_date, end_date, data_dir=None, polygon=None
                     if not 'S' in satname:
                         scale = image.select(channel_name_to_band('PAN', satname)).projection().nominalScale().getInfo()
                         print(f'scale of pancromatic: {scale}')
+                    # else:
+                    #     # NOTE scale udm band for sentinal imagery cuz its 8.99 m instead of 10 m resolution
+                    #     udm_band = channel_name_to_band('UDM', satname)
+                    #     # Resample the UDM band to match the 10m resolution of the other bands
+                    #     udm_resampled = (image.select(udm_band)
+                    #                         .resample()  # Use 'bilinear' for continuous data, 'nearest' for categorical
+                    #                         .reproject(crs=image.select(bands[0]).projection(), scale=10))
+                    #     image = image.addBands(udm_resampled) # Add the resampled UDM band back to the image
+                    #     bands.append(udm_band) # Add the UDM band back to the list of bands to export
+
+
+
+
                     # Prepare download URL
                     download_url = image.getDownloadURL({
                         'scale': 10,
@@ -204,6 +225,10 @@ def retrieve_imagery(sitename, start_date, end_date, data_dir=None, polygon=None
                     })
                     print(f'Downloading these bands {bands}')
                     print(f"Download URL: {download_url}")
+
+                    # if 'S' in satname:
+                    #     # NOTE udm band needs to be removed from bands each itteration because it is added above resampled as udm_resampled
+                    #     bands.remove(udm_band)
 
                     response = requests.get(download_url)
 
