@@ -447,14 +447,15 @@ def generate_custom_udm(datasets):
     Returns:
         np.ndarray: Generated UDM mask.
     """
-    # Read all bands into memory as numpy arrays
+
     band_arrays = [ds.GetRasterBand(1).ReadAsArray() for ds in datasets if ds is not None]
 
-    # Stack bands into a 3D array: shape (bands, height, width)
-    band_stack = np.array(band_arrays)
+    band_stack = np.array(band_arrays) # stacked image (bands, height, width)
 
-    # Generate UDM: Mark pixels where ALL bands are 0 as 1, else 0
-    udm_array = np.all(band_stack == 0, axis=0).astype(np.uint8)
+    # get what portion of the images should be in the UDM
+    # udm_array = np.all(band_stack == 0, axis=0).astype(np.uint8)
+    udm_array = np.all((band_stack == 0) | (band_stack == -np.inf) | np.isnan(band_stack), axis=0).astype(np.uint8)
+
 
     # Get metadata from first dataset
     ref_dataset = datasets[0]
@@ -474,6 +475,7 @@ def generate_custom_udm(datasets):
     udm_dataset.GetRasterBand(1).WriteArray(udm_array)
 
     return udm_dataset  # Now returns a proper GDAL dataset
+
 
 def plot_datasets(datasets_dict_list, pan_dataset_dict=None):
     ncols = len(datasets_dict_list) 
