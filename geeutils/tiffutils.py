@@ -99,7 +99,6 @@ def create_rgb_image(red_image, green_image, blue_image, scale=False):
     return rgb_image
 
 
-
 def combine_tiffs(tiff_files:list, output_path:str, satname=None, delete_original_files:bool=True, resample:bool=True, scale:bool=True):
     """
     This function gets the min and max pixel boundaries of a dataset
@@ -421,6 +420,9 @@ def resample_in_memory(input_dataset:gdal.Dataset, target_dataset:gdal.Dataset, 
         return pansharpened_dataset
 
     return output_dataset
+
+
+# def generate_custom_udm(recerence_band_path, band_paths, output_udm_path)
 
 
 def plot_datasets(datasets_dict_list, pan_dataset_dict=None):
