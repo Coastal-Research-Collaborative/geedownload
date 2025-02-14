@@ -142,6 +142,7 @@ def retrieve_imagery(sitename, start_date, end_date, data_dir=None, polygon=None
         if not os.path.exists(polygon_path):
             polygon_path = os.path.join(data_dir, 'siteinfo', sitename, f'{sitename}_polygon.geojson')
         if not os.path.exists(polygon_path):
+            print(polygon_path)
             raise('There is no polygon geojsonfiles in siteinfo/<sitename>/<sitename>_polygon.geojson or data/siteinfo/<sitename>/<sitename>_polygon.geojson')
         with open(polygon_path, 'r') as file: geojson_data = geojson.load(file)
         coords = geojson_data["features"][0]["geometry"]['coordinates'][0]
