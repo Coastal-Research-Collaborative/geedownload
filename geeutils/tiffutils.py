@@ -609,7 +609,7 @@ def clean_up_gee_downloads(data_dir):
 
             save_path = os.path.join(data_dir, satname, f'{satname}_{timestamp_str}.tif') # this gets rid of the LC08 or what ever other weird addition there is in the data
             resample = True
-            if satname.startswith('S'): resample = False # just resample for landsat (not for sentinel images)
+            if satname.startswith('S') or satname == 'L5': resample = False # just resample for landsat (not for sentinel images)
             combine_tiffs(fns, output_path=save_path, satname=satname, scale=True, resample=resample)
         
     del_leftover_band_files(data_dir)

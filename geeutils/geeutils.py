@@ -173,7 +173,8 @@ def retrieve_imagery(sitename, start_date, end_date, data_dir=None, polygon=None
                 channel_name_to_band('NIR', satname),
                 channel_name_to_band('UDM', satname) # NOTE dont want this for everytyhing because sentinel has wrong shape
             ]
-            if not 'S' in satname:
+            if not 'S' in satname and not satname == 'L5':
+                # landsat 5 doesnt have panchromatic band
                 # NOTE for sentinel the udm is like 8.99 m resolution while the rest is 10 m so explicitly ask for it in 10 m
                 # bands.append(channel_name_to_band('UDM', satname)) # landsat the udm should be in the right resolution naturally
                 bands.append(channel_name_to_band('PAN', satname)) # only landsat imagery has pan chromatic band
