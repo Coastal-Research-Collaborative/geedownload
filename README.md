@@ -32,13 +32,18 @@ end_date = '2024-08-30'
 ```
 3️⃣ Download Imagery
 ```python
-
+data_dir = 'path where imagery will be downloaded'  # Specify where to save images
 
 geedownload.retrieve_imagery(
     sitename=sitename, 
     start_date=start_date,
     end_date=end_date,
-    data_dir='path where imagery will be downloaded',  # Specify where to save images
+    data_dir=data_dir,
     polygon=coords
 )
+```
+4️⃣ Clean up Downloads
+GEE downloads imagery with separate files for each band, the following function combines these individual files to make one file for each satellite image (instead of one per each band).
+```python
+geedownload.clean_up_gee_downloads(data_dir)
 ```
