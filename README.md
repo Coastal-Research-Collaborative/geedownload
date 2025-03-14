@@ -11,11 +11,11 @@ pip install git+https://github.com/Coastal-Research-Collaborative/geedownload.gi
 ```
 ## 🚀 Usage
 
-1️⃣ Import the package
+#### 1️⃣ Import the package
 ```python
 import geedownload
 ```
-2️⃣ Define a Site, Coordinates, and Timeframe
+#### 2️⃣ Define a Site, Coordinates, and Timeframe
 ```python
 sitename = 'georgiajekyllisland'
 
@@ -30,7 +30,7 @@ coords = [
 start_date = '2024-07-01'
 end_date = '2024-08-30'
 ```
-3️⃣ Download Imagery
+#### 3️⃣ Download Imagery
 ```python
 data_dir = 'path where imagery will be downloaded'  # Specify where to save images
 
@@ -42,7 +42,7 @@ geedownload.retrieve_imagery(
     polygon=coords
 )
 ```
-4️⃣ Clean up Downloads
+#### 4️⃣ Clean up Downloads
 GEE downloads imagery with separate files for each band, the following function combines these individual files to make one file for each satellite image (instead of one per each band).
 ```python
 geedownload.clean_up_gee_downloads(data_dir)
