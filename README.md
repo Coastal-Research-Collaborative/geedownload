@@ -10,6 +10,7 @@ To install the package directly from GitHub, run:
 pip install git+https://github.com/Coastal-Research-Collaborative/geedownload.git
 ```
 🚀 Usage
+
 1️⃣ Import the package
 ```python
 import geedownload
