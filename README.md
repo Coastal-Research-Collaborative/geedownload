@@ -8,11 +8,10 @@ To install the package directly from GitHub, run:
 
 ```bash
 pip install git+https://github.com/Coastal-Research-Collaborative/geedownload.git
+```
 🚀 Usage
 1️⃣ Import the package
-python
-Copy
-Edit
+```python
 import geedownload
 import os  # Required for setting data directory
 2️⃣ Define a Site and Coordinates
@@ -28,13 +27,11 @@ coords = [
     [-81.41396967622494, 31.053126706868298],
     [-81.41396967622494, 31.035661672924554]
 ]
-
+```
 # Create a GeoJSON polygon from coordinates
 geedownload.create_polygon_geojson(sitename, coords=coords)
 3️⃣ Download Imagery
-python
-Copy
-Edit
+```python
 start_date = '2024-07-01'
 end_date = '2024-08-30'
 
@@ -45,3 +42,4 @@ geedownload.retrieve_imagery(
     data_dir=os.path.join('data', 'sat_images'),  # Specify where to save images
     polygon=coords
 )
+```
