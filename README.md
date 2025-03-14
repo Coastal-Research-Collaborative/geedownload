@@ -26,8 +26,6 @@ coords = [
     [-81.41396967622494, 31.035661672924554]
 ]
 ```
-# Create a GeoJSON polygon from coordinates
-geedownload.create_polygon_geojson(sitename, coords=coords)
 3️⃣ Download Imagery
 ```python
 start_date = '2024-07-01'
