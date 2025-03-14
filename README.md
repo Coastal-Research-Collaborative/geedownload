@@ -13,11 +13,9 @@ pip install git+https://github.com/Coastal-Research-Collaborative/geedownload.gi
 1️⃣ Import the package
 ```python
 import geedownload
-import os  # Required for setting data directory
+```
 2️⃣ Define a Site and Coordinates
-python
-Copy
-Edit
+```python
 sitename = 'georgiajekyllisland'
 
 coords = [
@@ -39,7 +37,7 @@ geedownload.retrieve_imagery(
     sitename=sitename, 
     start_date=start_date,
     end_date=end_date,
-    data_dir=os.path.join('data', 'sat_images'),  # Specify where to save images
+    data_dir='path where imagery will be downloaded',  # Specify where to save images
     polygon=coords
 )
 ```
