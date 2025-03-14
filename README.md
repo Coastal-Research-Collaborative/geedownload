@@ -1,8 +1,8 @@
-[![Last Commit](https://img.shields.io/github/last-commit/Climate-Resilience-Collaborative/CoastVision)](
-https://github.com/Climate-Resilience-Collaborative/CoastVision/commits/)
-![GitHub issues](https://img.shields.io/github/issues/Climate-Resilience-Collaborative/CoastVision)
+[![Last Commit](https://img.shields.io/github/last-commit/Coastal-Research-Collaborative/geedownload)](
+https://github.com/Coastal-Research-Collaborative/geedownload/commits/)
+![GitHub issues](https://img.shields.io/github/issues/Coastal-Research-Collaborative/geedownload)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-![GitHub commit activity](https://img.shields.io/github/commit-activity/y/Climate-Resilience-Collaborative/CoastVision)
+![GitHub commit activity](https://img.shields.io/github/commit-activity/y/Coastal-Research-Collaborative/geedownload)
 # 🌍 geedownload  
 
 **`geedownload`** is a Python package designed to facilitate the downloading of **Landsat** and **Sentinel** imagery from **Google Earth Engine (GEE)**.
