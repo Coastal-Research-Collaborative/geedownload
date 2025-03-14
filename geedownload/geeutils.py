@@ -1,7 +1,7 @@
 """
 functions to download landsat and sentinel imagery from google earth engine
 
-Joel Nicolow, Climate Resilience Collaborative, November 2024
+Joel Nicolow, Coastal Research Collaborative, November 2024
 """
 
 

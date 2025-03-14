@@ -1,3 +1,11 @@
+"""
+functions to proccess downloaded GEE imagery
+
+Joel Nicolow, Coastal Research Collaborative, November 2024
+"""
+
+
+
 import os
 from glob import glob
 import gc
