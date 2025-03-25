@@ -192,7 +192,7 @@ def retrieve_imagery(sitename, start_date, end_date, data_dir=None, polygon=None
             try:
                 n_images = collection.size().getInfo()
             except ee.ee_exception.EEException as e:
-                n_images = 0 # if n_images = 0 (it will print out that this is because there are no images avaible)
+                n_images = 0 # if n_images = 0 (it will print out that this is because there are no images available)
             if n_images > 0:
                 for image in collection.getInfo()['features']:
                     image_id = image['id']  # Get the ID of the image to download
@@ -268,7 +268,7 @@ def retrieve_imagery(sitename, start_date, end_date, data_dir=None, polygon=None
                             band = period_split[1] # last one is file extention
                             short_fn_no_band = period_split[0] # removes extention and band
                             # print(band)
-                            short_fn = f'{short_fn_no_band}.{channel_name_to_band(channel_name=band, satname=satname, reverse=True)}'
+                            short_fn = f'{short_fn_no_band}.{band}' #{channel_name_to_band(channel_name=band, satname=satname, reverse=True)}' # names are already set to hav ethe correct band name so no need reverse it
                             # print(short_fn)
 
                             new_filename = os.path.join(os.path.dirname(file_path), f"{satname}_{short_fn}.tif")
