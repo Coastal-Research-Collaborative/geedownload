@@ -606,7 +606,6 @@ def clean_up_gee_downloads(data_dir):
         for timestamp in timestamps:
 
             glob_pattern = os.path.join(sat_data_dir, f'{satname}*{timestamp}*.*.tif') # this is general so it works for sentinel and landsat
-
             fns = glob(glob_pattern)
 
             # NOTE: There may be duplicates for the same timestamp (e.g. S2_20191105T211921_20191105T211919_T04QEJ.B, S2_20191105T211921_20191105T211919_T04QEK.B)
@@ -617,7 +616,7 @@ def clean_up_gee_downloads(data_dir):
 
             save_path = os.path.join(data_dir, satname, f'{satname}_{timestamp_str}.tif') # this gets rid of the LC08 or what ever other weird addition there is in the data
             resample = True
-            if satname.startswith('S') or satname == 'L5': resample = False # just resample for landsat (not for sentinel images)
+            if satname.startswith('S') or satname == 'L5': resample = False # just resample for landsat 6 + (not for sentinel images)
             combine_tiffs(fns, output_path=save_path, satname=satname, scale=True, resample=resample)
         
     del_leftover_band_files(data_dir)
