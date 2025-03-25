@@ -23,6 +23,7 @@ pip install --upgrade git+https://github.com/Coastal-Research-Collaborative/geed
 
 #### 1️⃣ Import the package
 ```python
+import os
 import geedownload
 ```
 #### 2️⃣ Define a Site, Coordinates, and Timeframe
@@ -55,5 +56,5 @@ geedownload.retrieve_imagery(
 #### 4️⃣ Clean up Downloads
 GEE downloads imagery with separate files for each band, the following function combines these individual files to make one file for each satellite image (instead of one per each band).
 ```python
-geedownload.clean_up_gee_downloads(data_dir)
+geedownload.clean_up_gee_downloads(os.path.join(data_dir, sitename))
 ```

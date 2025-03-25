@@ -594,7 +594,9 @@ def del_leftover_band_files(data_dir):
 
 
 def clean_up_gee_downloads(data_dir):
-
+    """
+    :param data_dir: str path to the sitename folder (must have sitename in it)
+    """
     for satname in os.listdir(data_dir):
         print(f'{satname}-------------------------')
         sat_data_dir = os.path.join(data_dir, satname)
