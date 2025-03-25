@@ -132,7 +132,6 @@ def combine_tiffs(tiff_files:list, output_path:str, satname=None, delete_origina
     """
 
     # NOTE: sometimes for sentinel imagery it downloads duplicates of bands with the second one being empty
-    print('what about this function?')
     tiff_files = remove_duplicate_band_files(fns = tiff_files, timestamp=None) # this returns the files that are good and removes the ones that are bad/duplicates (and deletes them)
 
     if resample:
@@ -520,6 +519,8 @@ def remove_duplicate_band_files(fns, timestamp=None):
     NOTE fns should all be in the same directory and be for the same timestamp
     For sentinel 2 imagery they download and extra copy of each band that is null if you try to open it (for now just deleting the second one is sufficient but at a later point maybe need to have a smarter function)
     """
+    if len(fns) == 0: 
+        raise('In tiffutils.remove_duplicate_band_files() fns has lenght 0')
 
     bands = set()
     fns_filtered = []
@@ -528,7 +529,6 @@ def remove_duplicate_band_files(fns, timestamp=None):
     for fn in fns:
         bands.add(os.path.basename(fn).split('.')[1])
 
-    print(fns)
     if not timestamp is None:
         for band in bands:
             print(band)
@@ -608,7 +608,7 @@ def clean_up_gee_downloads(data_dir):
         timestamps = [get_timestamp(fn) for fn in red_fns] 
 
         for timestamp in timestamps:
-
+            print(f'{satname}*{timestamp}*.*.tif')
             glob_pattern = os.path.join(sat_data_dir, f'{satname}*{timestamp}*.*.tif') # this is general so it works for sentinel and landsat
             fns = glob(glob_pattern)
             print('What is going on like whathakwethkajrggkjhaskdjghakjs########################################')
