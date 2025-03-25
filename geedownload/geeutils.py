@@ -239,18 +239,13 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
 
                     # Check if the request was successful (status code 200)
                     if response.status_code == 200:
+                        # create download folder
                         download_folder_satname = os.path.join('data', 'sat_images', sitename, satname) # sitename dir was already made
-                        if not os.path.exists(download_folder_satname): os.makedirs(download_folder_satname)
+                        if not os.path.exists(download_folder_satname): os.makedirs(download_folder_satname) # make sure the download folder exists before saving the file
 
-                        # Modify the zip filename to include the satname at the beginning and avoid nested folders
+                        # change zip filename to include the satname at the beginning and avoid nested folders
                         image_id_fn = image_id.split("/")[-1]
                         zip_filename = os.path.join(download_folder_satname, f'{image_id_fn}_image.zip')
-
-                        print(zip_filename)
-                        
-                        # Make sure the download folder exists before saving the file
-                        if not os.path.exists(download_folder_satname):
-                            os.makedirs(download_folder_satname)
                         
                         with open(zip_filename, 'wb') as f:
                             f.write(response.content)
@@ -271,7 +266,11 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                             band = period_split[1] # last one is file extention
                             short_fn_no_band = period_split[0] # removes extention and band
                             # print(band)
-                            short_fn = f'{short_fn_no_band}.{channel_name_to_band(channel_name=band, satname=satname, reverse=True)}' # names are already set to hav ethe correct band name so no need reverse it
+                            try:
+                                short_fn = f'{short_fn_no_band}.{channel_name_to_band(channel_name=band, satname=satname, reverse=True)}'
+                            except ValueError:
+                                # for some weird reason sometimes they are already downloaded with the correct band names
+                                short_fn = f'{short_fn_no_band}.{band}' # names are already set to hav ethe correct band name so no need reverse it
                             # print(short_fn)
 
                             new_filename = os.path.join(os.path.dirname(file_path), f"{satname}_{short_fn}.tif")
