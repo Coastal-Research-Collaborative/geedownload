@@ -611,6 +611,8 @@ def clean_up_gee_downloads(data_dir):
 
             glob_pattern = os.path.join(sat_data_dir, f'{satname}*{timestamp}*.*.tif') # this is general so it works for sentinel and landsat
             fns = glob(glob_pattern)
+            print('What is going on like whathakwethkajrggkjhaskdjghakjs########################################')
+            print(len(fns))
 
             # NOTE: There may be duplicates for the same timestamp (e.g. S2_20191105T211921_20191105T211919_T04QEJ.B, S2_20191105T211921_20191105T211919_T04QEK.B)
             # check for these duplicates and pick one and delete the others
