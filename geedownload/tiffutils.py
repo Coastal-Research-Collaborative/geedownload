@@ -527,6 +527,8 @@ def remove_duplicate_band_files(fns, timestamp=None):
     # get bands
     for fn in fns:
         bands.add(os.path.basename(fn).split('.')[1])
+
+    print(fns)
     if not timestamp is None:
         for band in bands:
             print(band)
