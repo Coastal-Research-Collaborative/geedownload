@@ -14,6 +14,11 @@ To install the package directly from GitHub, run:
 ```bash
 pip install git+https://github.com/Coastal-Research-Collaborative/geedownload.git
 ```
+To upgrade this package, run:
+```bash
+pip install --upgrade git+https://github.com/Coastal-Research-Collaborative/geedownload.git
+```
+
 ## 🚀 Usage
 
 #### 1️⃣ Import the package
