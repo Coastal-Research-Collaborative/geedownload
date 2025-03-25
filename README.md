@@ -53,8 +53,3 @@ geedownload.retrieve_imagery(
     polygon=coords
 )
 ```
-#### 4️⃣ Clean up Downloads
-GEE downloads imagery with separate files for each band, the following function combines these individual files to make one file for each satellite image (instead of one per each band).
-```python
-geedownload.clean_up_gee_downloads(os.path.join(data_dir, sitename))
-```
