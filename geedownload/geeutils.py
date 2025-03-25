@@ -117,17 +117,17 @@ def channel_name_to_band(channel_name, satname, reverse=False):
             raise ValueError(f"Invalid channel name '{channel_name}' for satellite '{satname}'")
 
 
-def retrieve_imagery(sitename, start_date, end_date, data_dir=None, polygon=None, satnames=['L5', 'L7', 'L8', 'L9', 'S2'], proccess_downloads=True):
+def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, polygon=None, satnames:list=['L5', 'L7', 'L8', 'L9', 'S2'], proccess_downloads:bool=True):
     """
     Download imagery for a given site (if no polygon loads sitename file)
 
     :param sitename: str the name of the site (used for where the images are downloaded)
     :param start_date: str "YYY-MM-DD" 
     :param end_date: str "YYY-MM-DD" 
-    :param data_dir: str directory where the folder (named sitename should be placed)
+    :param data_dir: str directory where sat_images/<sitename> is held. NOTE do not include sat_images or sitename in data_dir
     :param polygon: 2d list [longitude1, latitude1], [longitude2, latitude2], [longitude3, latitude3], [longitude4, latitude4]] NOTE does not need to be a rectangle
     :param satnames: list of strs the names of the satellites that we want to download imagery from
-    :param process
+    :param proccess_downloads: bool if True then run tiffutils.clean_up_gee_downloads
     """
 
     authenticate_and_initialize() # authenticate and initialize gee
@@ -283,6 +283,9 @@ def retrieve_imagery(sitename, start_date, end_date, data_dir=None, polygon=None
                         print(f"Failed to download file. Status code: {response.status_code}")
             else:
                 print(f"No images found for {satname} in the given date range and polygon.")
+
+    if proccess_downloads:
+        tiffutils.clean_up_gee_downloads(download_folder)
 
 
 def create_polygon_geojson(sitename:str, coords:list, data_dir:str='data'):
