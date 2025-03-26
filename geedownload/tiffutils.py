@@ -531,7 +531,6 @@ def remove_duplicate_band_files(fns, timestamp=None):
 
     if not timestamp is None:
         for band in bands:
-            print(band)
             band_fns = glob(os.path.join(os.path.dirname(fns[0]), f'*{timestamp}*.{band}.tif'))
             fns_filtered.append(band_fns[0])
             if len(band_fns) > 1:
@@ -542,7 +541,7 @@ def remove_duplicate_band_files(fns, timestamp=None):
     else:
         # This is just for doing with multiple timesheets
         timestamps = {get_timestamp(fn) for fn in fns} # a set
-        print(timestamps)
+        # print(timestamps)
         for timestamp in timestamps:
             for band in bands:
                 band_fns = glob(os.path.join(os.path.dirname(fns[0]), f'*{timestamp}*.{band}.tif'))

@@ -183,8 +183,8 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                 bands.append(channel_name_to_band('PAN', satname)) # only landsat imagery has pan chromatic band
             
             
-            print(f'These are the bands for {satname}----------------------------------------')
-            print(bands)
+            # print(f'These are the bands for {satname}----------------------------------------')
+            # print(bands)
 
                 
 
