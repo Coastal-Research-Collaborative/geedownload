@@ -288,7 +288,7 @@ def combine_tiffs(tiff_files:list, output_path:str, satname=None, delete_origina
                 os.remove(tiff)
             except(PermissionError):
                 # This only happens for sentinel but it says permision denied
-                print('permission denied stoopid')
+                print('permission denied when cleaning up temp tiff files')
         if resample and not pan_dataset_dict is None:
             del pan_dataset_dict
             gc.collect()
