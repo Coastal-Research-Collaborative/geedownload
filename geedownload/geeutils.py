@@ -199,16 +199,16 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
             if n_images > 0:
                 for image in collection.getInfo()['features']:
                     image_id = image['id']  # Get the ID of the image to download
-                    print(f"Processing image: {image_id}")
+                    # print(f"Processing image: {image_id}")
 
                     image = ee.Image(image_id)
 
                     scale = image.select(channel_name_to_band('R', satname)).projection().nominalScale().getInfo()
-                    print(f'scale of red: {scale}')
-                    print('----------------------------------------------------------------')
+                    # print(f'scale of red: {scale}')
+                    # print('----------------------------------------------------------------')
                     if not 'S' in satname:
                         scale = image.select(channel_name_to_band('PAN', satname)).projection().nominalScale().getInfo()
-                        print(f'scale of pancromatic: {scale}')
+                        # print(f'scale of pancromatic: {scale}')
                     # else:
                     #     # NOTE scale udm band for sentinal imagery cuz its 8.99 m instead of 10 m resolution
                     #     udm_band = channel_name_to_band('UDM', satname)
@@ -228,8 +228,8 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                         'region': aoi.getInfo(),
                         'bands': bands
                     })
-                    print(f'Downloading these bands {bands}')
-                    print(f"Download URL: {download_url}")
+                    # print(f'Downloading these bands {bands}')
+                    # print(f"Download URL: {download_url}")
 
                     # if 'S' in satname:
                     #     # NOTE udm band needs to be removed from bands each itteration because it is added above resampled as udm_resampled
@@ -249,17 +249,16 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                         
                         with open(zip_filename, 'wb') as f:
                             f.write(response.content)
-                        print(f"File downloaded successfully as {zip_filename}")
+                        # print(f"File downloaded successfully as {zip_filename}")
 
                         # Unzip the file into the download folder
                         with zipfile.ZipFile(zip_filename, 'r') as zip_ref:
                             zip_ref.extractall(download_folder_satname)  # Extract directly into the download folder
-                        print(f"File unzipped successfully into {download_folder_satname}")
+                        # print(f"File unzipped successfully into {download_folder_satname}")
 
                         # prepend satelite name to file names and replace channel with the actual channel
                         for file_path in glob(os.path.join(download_folder_satname, f'*{image_id_fn}*')):
                             if file_path.endswith('.zip'): continue
-                            print(file_path)
                             short_fn = os.path.basename(file_path)
                             # print(short_fn)
                             period_split = short_fn.split('.')
@@ -269,7 +268,7 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                             try:
                                 short_fn = f'{short_fn_no_band}.{channel_name_to_band(channel_name=band, satname=satname, reverse=True)}'
                             except ValueError:
-                                # for some weird reason sometimes they are already downloaded with the correct band names
+                                # For some satellites it may just 
                                 short_fn = f'{short_fn_no_band}.{band}' # names are already set to hav ethe correct band name so no need reverse it
                             # print(short_fn)
 
