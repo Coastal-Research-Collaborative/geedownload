@@ -183,8 +183,8 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                 bands.append(channel_name_to_band('PAN', satname)) # only landsat imagery has pan chromatic band
             
             
-            # print(f'These are the bands for {satname}----------------------------------------')
-            # print(bands)
+            print(f'These are the bands for {satname}----------------------------------------')
+            print(bands)
 
                 
 
@@ -202,13 +202,17 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                     # print(f"Processing image: {image_id}")
 
                     image = ee.Image(image_id)
+                    # print(image.bandNames().getInfo())
 
-                    scale = image.select(channel_name_to_band('R', satname)).projection().nominalScale().getInfo()
-                    # print(f'scale of red: {scale}')
-                    # print('----------------------------------------------------------------')
-                    if not 'S' in satname:
-                        scale = image.select(channel_name_to_band('PAN', satname)).projection().nominalScale().getInfo()
-                        # print(f'scale of pancromatic: {scale}')
+
+                    # scale = image.select(channel_name_to_band('R', satname)).projection().nominalScale().getInfo()
+                    # # print(f'scale of red: {scale}')
+                    # # print('----------------------------------------------------------------')
+                    # if not 'S' in satname and not satname == 'L5':
+                    #     scale = image.select(channel_name_to_band('PAN', satname)).projection().nominalScale().getInfo()
+                    #     # print(f'scale of pancromatic: {scale}')
+                    # elif satname == 'L5':
+                    #     print('not panchromatic band for L5 so cant upsample resolution')
                     # else:
                     #     # NOTE scale udm band for sentinal imagery cuz its 8.99 m instead of 10 m resolution
                     #     udm_band = channel_name_to_band('UDM', satname)
@@ -223,11 +227,15 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
 
 
                     # Prepare download URL
-                    download_url = image.getDownloadURL({
-                        'scale': 10,
-                        'region': aoi.getInfo(),
-                        'bands': bands
-                    })
+                    try:
+                        download_url = image.getDownloadURL({
+                            'scale': 10,
+                            'region': aoi.getInfo(),
+                            'bands': bands
+                        })
+                    except Exception(e):
+                        print('uh oh')
+                        print(e)
                     # print(f'Downloading these bands {bands}')
                     # print(f"Download URL: {download_url}")
 
@@ -235,7 +243,11 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                     #     # NOTE udm band needs to be removed from bands each itteration because it is added above resampled as udm_resampled
                     #     bands.remove(udm_band)
 
-                    response = requests.get(download_url)
+                    try:
+                        response = requests.get(download_url)
+                    except Exception(e):
+                        print('what is going on?')
+                        print(e)
 
                     # Check if the request was successful (status code 200)
                     if response.status_code == 200:
