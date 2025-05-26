@@ -183,8 +183,8 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                 bands.append(channel_name_to_band('PAN', satname)) # only landsat imagery has pan chromatic band
             
             
-            print(f'These are the bands for {satname}----------------------------------------')
-            print(bands)
+            # print(f'These are the bands for {satname}----------------------------------------')
+            # print(bands)
 
                 
 
@@ -212,7 +212,8 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                     #     scale = image.select(channel_name_to_band('PAN', satname)).projection().nominalScale().getInfo()
                     #     # print(f'scale of pancromatic: {scale}')
                     # elif satname == 'L5':
-                    #     print('not panchromatic band for L5 so cant upsample resolution')
+                    #     NOTE no panchromatic band for L5 so cant upsample resolution
+                    #     print('no panchromatic band for L5 so cant upsample resolution')
                     # else:
                     #     # NOTE scale udm band for sentinal imagery cuz its 8.99 m instead of 10 m resolution
                     #     udm_band = channel_name_to_band('UDM', satname)
