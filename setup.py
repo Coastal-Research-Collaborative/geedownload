@@ -15,6 +15,7 @@ setup(
         "rasterio",
         "requests",
         "geojson",
-        "GDAL"
+        "GDAL",
+        "earthengine-api"
     ],  # Add dependencies if needed
 )
