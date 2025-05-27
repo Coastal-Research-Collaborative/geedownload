@@ -10,5 +10,11 @@ setup(
     name="geedownload",  # Package name (matches repo)
     version="0.1",
     packages=find_packages(),  # Automatically finds `geeutils/`
-    install_requires=[],  # Add dependencies if needed
+    install_requires=[
+        "numpy",
+        "rasterio",
+        "requests",
+        "geojson",
+        "GDAL"
+    ],  # Add dependencies if needed
 )
