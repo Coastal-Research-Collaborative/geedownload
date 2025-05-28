@@ -545,7 +545,7 @@ def remove_duplicate_band_files(fns, timestamp=None):
         for timestamp in timestamps:
             for band in bands:
                 band_fns = glob(os.path.join(os.path.dirname(fns[0]), f'*{timestamp}*.{band}.tif'))
-                if len(band_fns): continue # there is no duplicate for this band
+                if len(band_fns) == 0: continue # there is no duplicate for this band NOTE should this happen
                 fns_filtered.append(band_fns[0])
                 if len(band_fns) > 1:
                     # delete all but first
