@@ -611,6 +611,7 @@ def clean_up_gee_downloads(data_dir):
             print(f'{satname}*{timestamp}*.*.tif')
             glob_pattern = os.path.join(sat_data_dir, f'{satname}*{timestamp}*.*.tif') # this is general so it works for sentinel and landsat
             fns = glob(glob_pattern)
+            if len(fns): continue
             # print('What is going on like whathakwethkajrggkjhaskdjghakjs########################################')
             # print(len(fns))
 
