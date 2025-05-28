@@ -130,7 +130,6 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
     :param proccess_downloads: bool if True then run tiffutils.clean_up_gee_downloads
     """
 
-    tiffutils.clean_up_gee_downloads(download_folder) # NOTE if some imagery was download prior but clean up wasn't run or the download was stopped early this will clean up misalenious files
 
     authenticate_and_initialize() # authenticate and initialize gee
 
@@ -139,6 +138,9 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
     else:
         download_folder = os.path.join(data_dir, 'sat_images', sitename)
     if not os.path.exists(download_folder): os.makedirs(download_folder)
+
+    tiffutils.clean_up_gee_downloads(download_folder) # NOTE if some imagery was download prior but clean up wasn't run or the download was stopped early this will clean up misalenious files
+
 
     if polygon is None:
         # load from siteinfo
