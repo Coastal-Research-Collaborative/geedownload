@@ -14,9 +14,14 @@ To install the package directly from GitHub, run:
 ```bash
 pip install git+https://github.com/Coastal-Research-Collaborative/geedownload.git
 ```
-To upgrade this package, run the line above again, or:
+To upgrade this package, run:
 ```bash
 pip install --no-cache-dir --force-reinstall git+https://github.com/Coastal-Research-Collaborative/geedownload.git
+```
+or, uninstall then reinstall
+```bash
+pip uninstall geedownload
+pip install git+https://github.com/Coastal-Research-Collaborative/geedownload.git
 ```
 
 ## 🚀 Usage
