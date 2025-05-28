@@ -287,7 +287,11 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
 
                             new_filename = os.path.join(os.path.dirname(file_path), f"{satname}_{short_fn}.tif")
 
-                            if not file_path == new_filename: os.rename(file_path, new_filename) # NOTE done by resampling for landsay
+                            if not file_path == new_filename: 
+                                if os.path.exists(new_filename):
+                                    # this mostlikely means this data was already downloaded
+                                    os.remove(new_filename) # NOTE it will now get overridden
+                                os.rename(file_path, new_filename) # NOTE done by resampling for landsat
 
                         os.remove(zip_filename) # remove zip file
                     else:
