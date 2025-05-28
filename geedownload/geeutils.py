@@ -117,7 +117,7 @@ def channel_name_to_band(channel_name, satname, reverse=False):
             raise ValueError(f"Invalid channel name '{channel_name}' for satellite '{satname}'")
 
 
-def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, polygon=None, satnames:list=['L5', 'L7', 'L8', 'L9', 'S2'], proccess_downloads:bool=True):
+def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, polygon=None, satnames:list=['L4', 'L5', 'L7', 'L8', 'L9', 'S2'], proccess_downloads:bool=True):
     """
     Download imagery for a given site (if no polygon loads sitename file)
 
@@ -129,6 +129,8 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
     :param satnames: list of strs the names of the satellites that we want to download imagery from
     :param proccess_downloads: bool if True then run tiffutils.clean_up_gee_downloads
     """
+
+    tiffutils.clean_up_gee_downloads(download_folder) # NOTE if some imagery was download prior but clean up wasn't run or the download was stopped early this will clean up misalenious files
 
     authenticate_and_initialize() # authenticate and initialize gee
 
