@@ -291,7 +291,10 @@ def combine_tiffs(tiff_files:list, output_path:str, satname=None, delete_origina
                 os.remove(tiff)
             except(PermissionError):
                 # This only happens for sentinel but it says permision denied
-                print('permission denied when cleaning up temp tiff files')
+                # print('permission denied when cleaning up temp tiff files')
+                #NOTE this should be caught somewhere else
+                _ = 0 # just place holder
+
         if resample and not pan_dataset_dict is None:
             del pan_dataset_dict
             gc.collect()
@@ -535,6 +538,8 @@ def remove_duplicate_band_files(fns, timestamp=None):
     if not timestamp is None:
         for band in bands:
             band_fns = glob(os.path.join(os.path.dirname(fns[0]), f'*{timestamp}*.{band}.tif'))
+            if len(band_fns) == 0: 
+                print(f'no band files found for bands_fns which doesnt make a ton of sense\n{timestamp=}\n{fns=}')
             fns_filtered.append(band_fns[0])
             if len(band_fns) > 1:
                 # This means there are duplicates for the same timestamp just delete one of them (but make sure this is consistant across bands)
