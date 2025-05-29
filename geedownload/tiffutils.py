@@ -557,7 +557,7 @@ def remove_duplicate_band_files(fns, timestamp=None):
             band_fns = glob(os.path.join(os.path.dirname(fns[0]), f'*{timestamp}*.{band}.tif'))
             # if len(band_fns) == 0: continue # there is no duplicate for this band NOTE should this happen if the user downloaded some imagery then restarted 
             if len(band_fns) == 0: 
-                print(f'---------------------------------------------------------------\nno band files found for bands_fns which doesnt make a ton of sense\n{timestamp=}, {band=}\n{os.path.join(os.path.dirname(fns[0]), f'*{timestamp}*.{band}.tif')}\n{fns=}')
+                print(f"---------------------------------------------------------------\nno band files found for bands_fns which doesnt make a ton of sense\n{timestamp=}, {band=}\n{os.path.join(os.path.dirname(fns[0]), f'*{timestamp}*.{band}.tif')}\n{fns=}")
             fns_filtered.append(band_fns[0])
             if len(band_fns) > 1:
                 # delete all but first
