@@ -557,7 +557,7 @@ def remove_duplicate_band_files(fns, timestamp=None):
             band_fns = glob(os.path.join(os.path.dirname(fns[0]), f'*{timestamp}*.{band}.tif'))
             # if len(band_fns) == 0: continue # there is no duplicate for this band NOTE should this happen if the user downloaded some imagery then restarted 
             if len(band_fns) == 0: 
-                print(f'no band files found for bands_fns which doesnt make a ton of sense\n{timestamp=}, {band=}\n{fns=}')
+                print(f'---------------------------------------------------------------\nno band files found for bands_fns which doesnt make a ton of sense\n{timestamp=}, {band=}\n{os.path.join(os.path.dirname(fns[0]), f'*{timestamp}*.{band}.tif')}\n{fns=}')
             fns_filtered.append(band_fns[0])
             if len(band_fns) > 1:
                 # delete all but first
@@ -620,7 +620,7 @@ def clean_up_gee_downloads(data_dir):
         timestamps = [get_timestamp(fn) for fn in red_fns] 
 
         for timestamp in timestamps:
-            print(f'{satname}*{timestamp}*.*.tif')
+            # print(f'{satname}*{timestamp}*.*.tif')
             glob_pattern = os.path.join(sat_data_dir, f'{satname}*{timestamp}*.*.tif') # this is general so it works for sentinel and landsat
             fns = glob(glob_pattern)
             # if len(fns) == 0:  # NOTE this should only happen if there are some weirdly named files in the folder
