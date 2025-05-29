@@ -333,7 +333,7 @@ def get_timestamp(fn, convert_format=False) -> str:
         date = first_split[-1].split('.')[0]
         timestamp_str = f'{timestamp}_{date}'            
     elif satname.startswith('S'):
-        # Sentinel is in this format S2_20191101T000241_20191101T000243_T56HLH.B where the first time is start of aquisition and the second is end of aqwuizition in utc time
+        # Sentinel is in this format S2_20191101T000241_20191101T000243_T56HLH.B where the first time is start of aquisition and the second is end of aquizition in utc time (e.i when its processed on the ground)
         timestamp_str = fn.split('_')[1] # using start of image aquisition timestamp
 
     if convert_format:
@@ -638,7 +638,12 @@ def clean_up_gee_downloads(data_dir):
 
         for timestamp in timestamps:
             # print(f'{satname}*{timestamp}*.*.tif')
-            glob_pattern = os.path.join(sat_data_dir, f'{satname}*{timestamp}*.*.tif') # this is general so it works for sentinel and landsat
+            if satname.startswith('S'):
+                # NOTE sentinel imagery has two times S2_<sensing time>_<ground processing time>_T56HLH.B.tif (e.eg S2_20160615T235247_20160616T011257_T56HLH.B.tif)
+                # we choose to focus on sensing time (the first timestamp)
+                glob_pattern = os.path.join(sat_data_dir, f'{satname}*{timestamp}_*_*.*.tif') # constricts it so we just get the ones with the same sensing time
+            else:
+                glob_pattern = os.path.join(sat_data_dir, f'{satname}*{timestamp}*.*.tif') # this is general so it works for sentinel and landsat
             print(os.path.join(sat_data_dir, f'{satname}*{timestamp}*.*.tif'))
             fns = glob(glob_pattern)
             # if len(fns) == 0:  # NOTE this should only happen if there are some weirdly named files in the folder
