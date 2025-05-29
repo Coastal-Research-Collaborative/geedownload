@@ -656,6 +656,10 @@ def clean_up_gee_downloads(data_dir):
                 os.remove(save_path)
             resample = True
             if satname.startswith('S') or satname == 'L5': resample = False # just resample for landsat 6 + (not for sentinel images)
+            if len(fns) >= 6:
+                # most have 5 bands RGB NIR UDM but landsat 7 and up have PAN band too
+                print('----what is going on with the clean_up_gee_downloads stuff?')
+                print(fns)
             combine_tiffs(fns, output_path=save_path, satname=satname, scale=True, resample=resample)
         
     del_leftover_band_files(data_dir)
