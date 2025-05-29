@@ -304,7 +304,7 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                         os.remove(zip_filename) # remove zip file
 
 
-                        tiffutils.combine_tiffs(tiff_files=this_image_component_fns) # for each image combine band tiffs into one tiff file
+                        # tiffutils.combine_tiffs(tiff_files=this_image_component_fns, output_dir=....need to implement accepting none for this) # for each image combine band tiffs into one tiff file
                     else:
                         print(f"Failed to download file. Status code: {response.status_code}")
             else:
