@@ -133,8 +133,9 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
 
 
     # NOTE: sometimes for sentinel imagery it downloads duplicates of bands with the second one being empty
+    print(f'*****************************{len(tiff_files)=} before remove dup')
     tiff_files = remove_duplicate_band_files(fns = tiff_files, timestamp=None) # this returns the files that are good and removes the ones that are bad/duplicates (and deletes them)
-    print(f'*****************************{len(tiff_files)=} after dup')
+    print(f'*****************************{len(tiff_files)=} after remove dup')
     
     
     if output_path is None:
