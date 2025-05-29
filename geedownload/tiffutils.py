@@ -107,7 +107,7 @@ def create_rgb_image(red_image, green_image, blue_image, scale=False):
     return rgb_image
 
 
-def combine_tiffs(tiff_files:list, output_path:str, satname=None, delete_original_files:bool=True, resample:bool=True, scale:bool=True):
+def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_original_files:bool=True, resample:bool=True, scale:bool=True):
     """
     This function gets the min and max pixel boundaries of a dataset
 
@@ -116,7 +116,7 @@ def combine_tiffs(tiff_files:list, output_path:str, satname=None, delete_origina
     tiff_files : list
         list of tiff filenames
     output_path : str
-        path to where the output combined tiff will be saved
+        path to where the output combined tiff will be saved (if None then just same as the first tiff)
     satname : 
         None which mean it does generic minmax scaling but otherwise it does /10_000 for S2 (sentinel) and 
     delete_original_files : bool
@@ -131,8 +131,12 @@ def combine_tiffs(tiff_files:list, output_path:str, satname=None, delete_origina
     tuple of four ints
     """
 
+
     # NOTE: sometimes for sentinel imagery it downloads duplicates of bands with the second one being empty
     tiff_files = remove_duplicate_band_files(fns = tiff_files, timestamp=None) # this returns the files that are good and removes the ones that are bad/duplicates (and deletes them)
+    
+    if output_path is None:
+        output_path = os.path.dirname(tiff_files[0]) # this function is set up to take fns from the same folder so this works
 
     if resample:
         # seperate pan sharpened band

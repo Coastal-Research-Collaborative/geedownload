@@ -201,8 +201,8 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
             except ee.ee_exception.EEException as e:
                 n_images = 0 # if n_images = 0 (it will print out that this is because there are no images available)
             if n_images > 0:
-                for image in collection.getInfo()['features']:
-                    image_id = image['id']  # Get the ID of the image to download
+                for image in collection.getInfo()['features']: 
+                    image_id = image['id']  # Get the ID of the image to download. This is each image not each band 
                     # print(f"Processing image: {image_id}")
 
                     image = ee.Image(image_id)
@@ -239,7 +239,7 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                             'bands': bands
                         })
                     except Exception(e):
-                        print('uh oh')
+                        print('download url image.getDownloadURL issue')
                         print(e)
                     # print(f'Downloading these bands {bands}')
                     # print(f"Download URL: {download_url}")
@@ -251,7 +251,7 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                     try:
                         response = requests.get(download_url)
                     except Exception(e):
-                        print('what is going on?')
+                        print('what is going on? requests.get exception')
                         print(e)
 
                     # Check if the request was successful (status code 200)
@@ -274,8 +274,9 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                         # print(f"File unzipped successfully into {download_folder_satname}")
 
                         # prepend satelite name to file names and replace channel with the actual channel
+                        this_image_component_fns = [] # these are each of the band names for the 
                         for file_path in glob(os.path.join(download_folder_satname, f'*{image_id_fn}*')):
-                            if file_path.endswith('.zip'): continue
+                            if file_path.endswith('.zip'): continue # This is the zip file we took them out of
                             short_fn = os.path.basename(file_path)
                             # print(short_fn)
                             period_split = short_fn.split('.')
@@ -286,7 +287,7 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                                 short_fn = f'{short_fn_no_band}.{channel_name_to_band(channel_name=band, satname=satname, reverse=True)}'
                             except ValueError:
                                 # For some satellites it may just 
-                                short_fn = f'{short_fn_no_band}.{band}' # names are already set to hav ethe correct band name so no need reverse it
+                                short_fn = f'{short_fn_no_band}.{band}' # names are already set to have the correct band name so no need reverse it
                             # print(short_fn)
 
                             new_filename = os.path.join(os.path.dirname(file_path), f"{satname}_{short_fn}.tif")
@@ -296,8 +297,14 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                                     # this mostlikely means this data was already downloaded
                                     os.remove(new_filename) # NOTE it will now get overridden
                                 os.rename(file_path, new_filename) # NOTE done by resampling for landsat
+                            
+                            this_image_component_fns.append(new_filename) # save band file to list so fns can all be combined
+
 
                         os.remove(zip_filename) # remove zip file
+
+
+                        tiffutils.combine_tiffs(tiff_files=this_image_component_fns) # for each image combine band tiffs into one tiff file
                     else:
                         print(f"Failed to download file. Status code: {response.status_code}")
             else:
