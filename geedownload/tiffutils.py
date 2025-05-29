@@ -265,7 +265,10 @@ def combine_tiffs(tiff_files:list, output_path:str, satname=None, delete_origina
                 band_data = scale_band(band_data, satname=satname)
             output_band = output_dataset.GetRasterBand(idx)
             output_band.WriteArray(band_data)
-            output_band.SetDescription(band_descriptions[idx-1]) # NOTE because enumerator starts at 1
+            try:
+                output_band.SetDescription(band_descriptions[idx-1]) # NOTE because enumerator starts at 1
+            except IndexError as e:
+                print(f'Index error at output_band.SetDescription(band_descriptions[idx-1])\n{satname=}\n{tiff_files=}')
 
         # close datasets to release resources -------------------------------------------------
         output_dataset.FlushCache()
@@ -545,7 +548,7 @@ def remove_duplicate_band_files(fns, timestamp=None):
         for timestamp in timestamps:
             for band in bands:
                 band_fns = glob(os.path.join(os.path.dirname(fns[0]), f'*{timestamp}*.{band}.tif'))
-                if len(band_fns) == 0: continue # there is no duplicate for this band NOTE should this happen
+                # if len(band_fns) == 0: continue # there is no duplicate for this band NOTE should this happen if the user downloaded some imagery then restarted 
                 fns_filtered.append(band_fns[0])
                 if len(band_fns) > 1:
                     # delete all but first
@@ -598,7 +601,7 @@ def clean_up_gee_downloads(data_dir):
     :param data_dir: str path to the sitename folder (must have sitename in it)
     """
     for satname in os.listdir(data_dir):
-        print(f'{satname}-------------------------')
+        print(f'Cleaning {satname} folder clean_up_gee_downloads() -------------------------')
         sat_data_dir = os.path.join(data_dir, satname)
         # if satname == 'S2': continue
 
@@ -611,11 +614,9 @@ def clean_up_gee_downloads(data_dir):
             print(f'{satname}*{timestamp}*.*.tif')
             glob_pattern = os.path.join(sat_data_dir, f'{satname}*{timestamp}*.*.tif') # this is general so it works for sentinel and landsat
             fns = glob(glob_pattern)
-            if len(fns) == 0: 
-                print(f'somehow there are no images for {timestamp=}')
-                continue
-            # print('What is going on like whathakwethkajrggkjhaskdjghakjs########################################')
-            # print(len(fns))
+            # if len(fns) == 0:  # NOTE this should only happen if there are some weirdly named files in the folder
+            #     print(f'somehow there are no images for {timestamp=}')
+            #     continue
 
             # NOTE: There may be duplicates for the same timestamp (e.g. S2_20191105T211921_20191105T211919_T04QEJ.B, S2_20191105T211921_20191105T211919_T04QEK.B)
             # check for these duplicates and pick one and delete the others
