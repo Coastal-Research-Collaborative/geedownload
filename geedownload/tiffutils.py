@@ -138,6 +138,7 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
     
     
     if output_path is None:
+        raise('Not implemented output_path needs to be given for  combine_tiffs cannot be none')
         output_path = os.path.dirname(tiff_files[0]) # this function is set up to take fns from the same folder so this works
 
     if resample:
@@ -649,6 +650,9 @@ def clean_up_gee_downloads(data_dir):
             timestamp_str = convert_raw_timestamp(timestamp_str=timestamp, satname=satname) # using one timestamp format for all satelittes
 
             save_path = os.path.join(data_dir, satname, f'{satname}_{timestamp_str}.tif') # this gets rid of the LC08 or what ever other weird addition there is in the data
+            if os.path.exists(save_path):
+                # if the combined tiff is already created override it
+                os.remove(save_path)
             resample = True
             if satname.startswith('S') or satname == 'L5': resample = False # just resample for landsat 6 + (not for sentinel images)
             combine_tiffs(fns, output_path=save_path, satname=satname, scale=True, resample=resample)
