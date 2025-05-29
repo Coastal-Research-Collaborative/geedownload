@@ -114,7 +114,7 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
     Arguments:
     ----------
     tiff_files : list
-        list of tiff filenames
+        list of tiff filenames NOTE they should all be for the same image (scene)
     output_path : str
         path to where the output combined tiff will be saved (if None then just same as the first tiff)
     satname : 
@@ -134,6 +134,8 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
 
     # NOTE: sometimes for sentinel imagery it downloads duplicates of bands with the second one being empty
     tiff_files = remove_duplicate_band_files(fns = tiff_files, timestamp=None) # this returns the files that are good and removes the ones that are bad/duplicates (and deletes them)
+    print(f'*****************************{len(tiff_files)=} after dup')
+    
     
     if output_path is None:
         output_path = os.path.dirname(tiff_files[0]) # this function is set up to take fns from the same folder so this works
@@ -151,7 +153,7 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
             pan_dataset_dict = {'filename': pan_file, 'dataset': gdal.Open(pan_file)} # NOTE pan band is not saved as part of the output file
             tiff_files = [file for file in tiff_files if not file.endswith('.PAN.tif')]
 
-    
+    print(f'*****************************{len(tiff_files)=} after resample')
     order = {'R': 0, 'G': 1, 'B': 2, 'NIR': 3, 'PAN': 4, 'UDM': 5}
     tiff_files = sorted(tiff_files, key=lambda x: order[x.split('.')[-2]]) # only for man images
     # Open all TIFF files as datasets
@@ -186,7 +188,7 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
                             resampling_method=resample_method,
                             apply_pansharpen=pan_sharpen
                             )             
-        
+    print(f'*****************************{len(tiff_files)=} after datasets have been made')
     # Check that all datasets have the same CRS, bounds, and resolution
     datasets = [item.get('dataset') for item in datasets_dict_list] # extract just the datasets
     # del datasets_dict_list # we are not going to use the datasets_dict_list again
@@ -261,6 +263,9 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
         output_dataset.SetGeoTransform(ref_dataset.GetGeoTransform())
         output_dataset.SetProjection(ref_dataset.GetProjection())
 
+        print(f'*****************************{len(tiff_files)=} if rescale')
+
+
         # write each file (band) as a separate layer in the output dataset
         band_descriptions = ['Red', 'Green', 'Blue', 'NIR', 'UDM']
         for idx, ds in enumerate(datasets, start=1):
@@ -272,7 +277,10 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
             try:
                 output_band.SetDescription(band_descriptions[idx-1]) # NOTE because enumerator starts at 1
             except IndexError as e:
+                print('--------------------------\nthe mostlikely culpreit of the error below is having files duplicated in the tiff_files')
                 print(f'Index error at output_band.SetDescription(band_descriptions[idx-1])\nno index {idx}\n{satname=}\n{tiff_files=}')
+                print('Bands we care about have been combined so avoarting here')
+                break # NOTE this is due to another error so just skip already the five bands we care about have been combined
 
         # close datasets to release resources -------------------------------------------------
         output_dataset.FlushCache()
