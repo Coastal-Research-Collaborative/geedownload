@@ -646,9 +646,9 @@ def clean_up_gee_downloads(data_dir):
                 glob_pattern = os.path.join(sat_data_dir, f'{satname}*{timestamp}*.*.tif') # this is general so it works for sentinel and landsat
             print(os.path.join(sat_data_dir, f'{satname}*{timestamp}*.*.tif'))
             fns = glob(glob_pattern)
-            # if len(fns) == 0:  # NOTE this should only happen if there are some weirdly named files in the folder
-            #     print(f'somehow there are no images for {timestamp=}')
-            #     continue
+            if len(fns) == 0:  # NOTE this should only happen if there are some weirdly named files in the folder
+                print(f'somehow there are no images for {timestamp=}')
+                continue
 
             # NOTE: There may be duplicates for the same timestamp (e.g. S2_20191105T211921_20191105T211919_T04QEJ.B, S2_20191105T211921_20191105T211919_T04QEK.B)
             # check for these duplicates and pick one and delete the others
