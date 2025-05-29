@@ -529,6 +529,9 @@ def remove_duplicate_band_files(fns, timestamp=None):
     NOTE fns should all be in the same directory and be for the same timestamp
     For sentinel 2 imagery they download and extra copy of each band that is null if you try to open it (for now just deleting the second one is sufficient but at a later point maybe need to have a smarter function)
     """
+    seen = set()
+    fns = [x for x in fns if not (x in seen or seen.add(x))] # NOTE if there are duplicate fns in the fns list this way it wont be propigated past this function
+
     if len(fns) == 0: 
         raise('In tiffutils.remove_duplicate_band_files() fns has lenght 0')
 
