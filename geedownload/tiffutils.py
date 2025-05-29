@@ -536,42 +536,46 @@ def remove_duplicate_band_files(fns, timestamp=None):
         bands.add(os.path.basename(fn).split('.')[1])
 
     if not timestamp is None:
+        timestamps = [timestamp] # just look for a specific timestamp
+        # for band in bands:
+        #     band_fns = glob(os.path.join(os.path.dirname(fns[0]), f'*{timestamp}*.{band}.tif'))
+        #     if len(band_fns) == 0: 
+        #         print(f'no band files found for bands_fns which doesnt make a ton of sense\n{timestamp=}, {band=}\n{fns=}')
+        #     fns_filtered.append(band_fns[0])
+        #     if len(band_fns) > 1:
+        #         # This means there are duplicates for the same timestamp just delete one of them (but make sure this is consistant across bands)
+        #         # delete all but first
+        #         for band_fn in band_fns[1:]:
+        #             os.remove(band_fn)     
+    else:
+        # This does all imagery in the fn list all the different timestamps
+        timestamps = {get_timestamp(fn) for fn in fns} # a set
+    
+    # print(timestamps)
+    for timestamp in timestamps:
         for band in bands:
             band_fns = glob(os.path.join(os.path.dirname(fns[0]), f'*{timestamp}*.{band}.tif'))
+            # if len(band_fns) == 0: continue # there is no duplicate for this band NOTE should this happen if the user downloaded some imagery then restarted 
             if len(band_fns) == 0: 
                 print(f'no band files found for bands_fns which doesnt make a ton of sense\n{timestamp=}, {band=}\n{fns=}')
             fns_filtered.append(band_fns[0])
             if len(band_fns) > 1:
-                # This means there are duplicates for the same timestamp just delete one of them (but make sure this is consistant across bands)
                 # delete all but first
                 for band_fn in band_fns[1:]:
                     os.remove(band_fn)     
-    else:
-        # This is just for doing with multiple timesheets
-        timestamps = {get_timestamp(fn) for fn in fns} # a set
-        # print(timestamps)
-        for timestamp in timestamps:
-            for band in bands:
-                band_fns = glob(os.path.join(os.path.dirname(fns[0]), f'*{timestamp}*.{band}.tif'))
-                # if len(band_fns) == 0: continue # there is no duplicate for this band NOTE should this happen if the user downloaded some imagery then restarted 
-                fns_filtered.append(band_fns[0])
-                if len(band_fns) > 1:
-                    # delete all but first
-                    for band_fn in band_fns[1:]:
-                        os.remove(band_fn)     
-                # for band_fn in band_fns:
-                #     if 'QEK' in band_fn:
-                #         # NOTE: just temparrary because these seem to be the broken files: data\sat_images\hawaiisharkscoveoahu\S2\S2_20191120T211919_20191120T211914_T04QEK.NIR.tif
-                #         os.remove(band_fn)
-                # if len(band_fns) > 1:
-                #     # This means there are duplicates for the same timestamp just delete one of them (but make sure this is consistant across bands)
-                #     for band_fn in band_fns:
-                #         dataset = gdal.Open(band_fn)
-                #         if dataset is None:
-                #             os.remove(band_fn)
-                #             print(f'Deleting: {band_fn}')
-                #         else:
-                #             dataset = None # this should be a way to close this
+            # for band_fn in band_fns:
+            #     if 'QEK' in band_fn:
+            #         # NOTE: just temparrary because these seem to be the broken files: data\sat_images\hawaiisharkscoveoahu\S2\S2_20191120T211919_20191120T211914_T04QEK.NIR.tif
+            #         os.remove(band_fn)
+            # if len(band_fns) > 1:
+            #     # This means there are duplicates for the same timestamp just delete one of them (but make sure this is consistant across bands)
+            #     for band_fn in band_fns:
+            #         dataset = gdal.Open(band_fn)
+            #         if dataset is None:
+            #             os.remove(band_fn)
+            #             print(f'Deleting: {band_fn}')
+            #         else:
+            #             dataset = None # this should be a way to close this
     return fns_filtered
 
 
