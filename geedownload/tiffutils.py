@@ -629,7 +629,7 @@ def clean_up_gee_downloads(data_dir):
 
             # NOTE: There may be duplicates for the same timestamp (e.g. S2_20191105T211921_20191105T211919_T04QEJ.B, S2_20191105T211921_20191105T211919_T04QEK.B)
             # check for these duplicates and pick one and delete the others
-            remove_duplicate_band_files(fns, timestamp)
+            # fns = remove_duplicate_band_files(fns, timestamp) # NOTE this is run at the begining of combine anyways
 
             timestamp_str = convert_raw_timestamp(timestamp_str=timestamp, satname=satname) # using one timestamp format for all satelittes
 
