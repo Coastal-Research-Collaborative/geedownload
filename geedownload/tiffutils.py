@@ -133,9 +133,7 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
 
 
     # NOTE: sometimes for sentinel imagery it downloads duplicates of bands with the second one being empty
-    print(f'*****************************{len(tiff_files)=} before remove dup')
     tiff_files = remove_duplicate_band_files(fns = tiff_files, timestamp=None) # this returns the files that are good and removes the ones that are bad/duplicates (and deletes them)
-    print(f'*****************************{len(tiff_files)=} after remove dup')
     
     
     if output_path is None:
@@ -155,7 +153,6 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
             pan_dataset_dict = {'filename': pan_file, 'dataset': gdal.Open(pan_file)} # NOTE pan band is not saved as part of the output file
             tiff_files = [file for file in tiff_files if not file.endswith('.PAN.tif')]
 
-    print(f'*****************************{len(tiff_files)=} after resample')
     order = {'R': 0, 'G': 1, 'B': 2, 'NIR': 3, 'PAN': 4, 'UDM': 5}
     tiff_files = sorted(tiff_files, key=lambda x: order[x.split('.')[-2]]) # only for man images
     # Open all TIFF files as datasets
@@ -190,7 +187,6 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
                             resampling_method=resample_method,
                             apply_pansharpen=pan_sharpen
                             )             
-    print(f'*****************************{len(tiff_files)=} after datasets have been made')
     # Check that all datasets have the same CRS, bounds, and resolution
     datasets = [item.get('dataset') for item in datasets_dict_list] # extract just the datasets
     # del datasets_dict_list # we are not going to use the datasets_dict_list again
@@ -666,6 +662,7 @@ def clean_up_gee_downloads(data_dir):
                 # most have 5 bands RGB NIR UDM but landsat 7 and up have PAN band too
                 print('----what is going on with the clean_up_gee_downloads stuff?')
                 print(fns)
+                raise('If this happens there is a bug somewhere ^')
             combine_tiffs(fns, output_path=save_path, satname=satname, scale=True, resample=resample)
         
     del_leftover_band_files(data_dir)
