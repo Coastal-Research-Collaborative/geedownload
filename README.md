@@ -28,7 +28,6 @@ pip install git+https://github.com/Coastal-Research-Collaborative/geedownload.gi
 
 #### 1️⃣ Import the package
 ```python
-import os
 import geedownload
 ```
 #### 2️⃣ Define a Site, Coordinates, and Timeframe
