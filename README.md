@@ -21,6 +21,8 @@ pip install --no-cache-dir --force-reinstall git+https://github.com/Coastal-Rese
 or, uninstall then reinstall
 ```bash
 pip uninstall geedownload
+```
+```bash
 pip install git+https://github.com/Coastal-Research-Collaborative/geedownload.git
 ```
 
@@ -28,7 +30,6 @@ pip install git+https://github.com/Coastal-Research-Collaborative/geedownload.gi
 
 #### 1️⃣ Import the package
 ```python
-import os
 import geedownload
 ```
 #### 2️⃣ Define a Site, Coordinates, and Timeframe
