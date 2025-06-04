@@ -21,6 +21,8 @@ pip install --no-cache-dir --force-reinstall git+https://github.com/Coastal-Rese
 or, uninstall then reinstall
 ```bash
 pip uninstall geedownload
+```
+```bash
 pip install git+https://github.com/Coastal-Research-Collaborative/geedownload.git
 ```
 
