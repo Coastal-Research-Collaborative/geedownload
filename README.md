@@ -59,3 +59,6 @@ geedownload.retrieve_imagery(
     polygon=coords
 )
 ```
+
+There is a similar Python package for Planet Lab's PlanetScope image download [**here**](https://github.com/Coastal-Research-Collaborative/planetscopedownload)
+
