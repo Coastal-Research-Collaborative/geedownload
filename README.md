@@ -3,11 +3,11 @@ https://github.com/Coastal-Research-Collaborative/geedownload/commits/)
 ![GitHub issues](https://img.shields.io/github/issues/Coastal-Research-Collaborative/geedownload)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 ![GitHub commit activity](https://img.shields.io/github/commit-activity/y/Coastal-Research-Collaborative/geedownload)
-# 🌍 geedownload  
+# geedownload  
 
 **`geedownload`** is a Python package designed to facilitate the downloading of **Landsat** and **Sentinel** imagery from **Google Earth Engine (GEE)**.
 
-## 📥 Installation  
+## Installation  
 
 To install the package directly from GitHub, run:  
 
@@ -26,7 +26,7 @@ pip uninstall geedownload
 pip install git+https://github.com/Coastal-Research-Collaborative/geedownload.git
 ```
 
-## 🚀 Usage
+## Usage
 
 #### 1️⃣ Import the package
 ```python
@@ -59,3 +59,6 @@ geedownload.retrieve_imagery(
     polygon=coords
 )
 ```
+
+There is a similar Python package for Planet Lab's PlanetScope image download [**here**](https://github.com/Coastal-Research-Collaborative/planetscopedownload)
+
