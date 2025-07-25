@@ -16,6 +16,31 @@ import numpy as np
 from osgeo import gdal
 
 
+def convert_to_celsius(image_array, method='kelvin', **kwargs):
+    if method == 'kelvin':
+        return image_array - 273.15
+    elif method == 'radiance':
+        K1 = kwargs.get('K1')
+        K2 = kwargs.get('K2')
+        if K1 is None or K2 is None:
+            raise ValueError("K1 and K2 constants are required for radiance to temperature conversion")
+        radiance = image_array
+        kelvin = K2 / np.log((K1 / radiance) + 1)
+        return kelvin - 273.15
+    elif method == 'dn':
+        gain = kwargs.get('gain')
+        offset = kwargs.get('offset')
+        K1 = kwargs.get('K1')
+        K2 = kwargs.get('K2')
+        if None in (gain, offset, K1, K2):
+            raise ValueError("Gain, offset, K1, and K2 are all required for DN to Celsius conversion")
+        radiance = gain * image_array + offset
+        kelvin = K2 / np.log((K1 / radiance) + 1)
+        return kelvin - 273.15
+    else:
+        raise ValueError("Unknown conversion method")
+
+
 def load_single_band_tiff_image(fn, plot=False, plot_scale=1):
     with rasterio.open(fn) as src:
         # Read the data
@@ -27,16 +52,17 @@ def load_single_band_tiff_image(fn, plot=False, plot_scale=1):
         image_transposed = np.transpose(image, (1, 2, 0)) # get image in (h, w, channel)
         # print(f"Image shape: {image_transposed.shape}")
 
+        image_transposed = convert_to_celsius(image_transposed)
         if plot:
            
             min_val = image_transposed.min()
-            max_val = image_transposed.min()
+            max_val = image_transposed.max()
 
 
             fig, axes = plt.subplots(nrows=1, ncols=1, figsize=(10, 20))
             axes.imshow(image_transposed/plot_scale)
             axes.set_title(f'{os.path.basename(fn)}, {image_transposed.shape}\n min:{min_val}, max:{max_val}')
-       
+    
             fig.show()
             plt.show()
 
