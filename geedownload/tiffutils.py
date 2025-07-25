@@ -131,6 +131,10 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
     tuple of four ints
     """
 
+    order = {'R': 0, 'G': 1, 'B': 2, 'NIR': 3, 'PAN': 4, 'UDM': 5}
+    valid_suffixes = [f".{band}.tif" for band in order.keys()] # only want the bands included here to be combined
+    tiff_files = [f for f in tiff_files if any(f.endswith(suffix) for suffix in valid_suffixes)]
+
 
     # NOTE: sometimes for sentinel imagery it downloads duplicates of bands with the second one being empty
     tiff_files = remove_duplicate_band_files(fns = tiff_files, timestamp=None) # this returns the files that are good and removes the ones that are bad/duplicates (and deletes them)
@@ -153,7 +157,6 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
             pan_dataset_dict = {'filename': pan_file, 'dataset': gdal.Open(pan_file)} # NOTE pan band is not saved as part of the output file
             tiff_files = [file for file in tiff_files if not file.endswith('.PAN.tif')]
 
-    order = {'R': 0, 'G': 1, 'B': 2, 'NIR': 3, 'PAN': 4, 'UDM': 5}
     tiff_files = sorted(tiff_files, key=lambda x: order[x.split('.')[-2]]) # only for man images
     # Open all TIFF files as datasets
 

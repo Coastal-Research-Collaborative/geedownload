@@ -72,7 +72,8 @@ def channel_name_to_band(channel_name, satname, reverse=False):
             'swir1': 'B6',      # SWIR
             'swir2': 'B7',      # SWIR
             'PAN': 'B8', # this is used for panchromatic sharpening
-            'TIR': 'ST_B10', # corrected surface temperature
+            'TIR': 'B10', # themal infrared 
+            'TIR2': 'B11',
             'UDM': 'QA_PIXEL'   # QA Band for cloud/shadow
         },
         
@@ -85,7 +86,8 @@ def channel_name_to_band(channel_name, satname, reverse=False):
             'swir1': 'B6',      # SWIR
             'swir2': 'B7',      # SWIR
             'PAN': 'B8', # this is used for panchromatic sharpening
-            'TIR': 'ST_B10', # corrected surface temperature
+            'TIR': 'B10', # themal infrared 
+            'TIR2': 'B11',
             'UDM': 'QA_PIXEL'   # QA Band for cloud/shadow
         },
         
