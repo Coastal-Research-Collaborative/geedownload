@@ -7,6 +7,7 @@ Joel Nicolow, Coastal Research Collaborative, November 2024
 
 
 import os
+import shutil
 from glob import glob
 import gc
 import rasterio
@@ -15,6 +16,35 @@ import numpy as np
 from osgeo import gdal
 
 
+def load_single_band_tiff_image(fn, plot=False, plot_scale=1):
+    with rasterio.open(fn) as src:
+        # Read the data
+        image = src.read()  # This loads all bands as a numpy array
+        # profile = src.profile  # Metadata about the file
+        # Display some metadata
+        # print(f"CRS: {src.crs}")
+        # print(f"Bounds: {src.bounds}")
+        image_transposed = np.transpose(image, (1, 2, 0)) # get image in (h, w, channel)
+        # print(f"Image shape: {image_transposed.shape}")
+
+        if plot:
+           
+            min_val = image_transposed.min()
+            max_val = image_transposed.min()
+
+
+            fig, axes = plt.subplots(nrows=1, ncols=1, figsize=(10, 20))
+            axes.imshow(image_transposed/plot_scale)
+            axes.set_title(f'{os.path.basename(fn)}, {image_transposed.shape}\n min:{min_val}, max:{max_val}')
+       
+            fig.show()
+            plt.show()
+
+            # for channel in range(image_transposed.shape[2]):
+            #     plt.imshow(image_transposed[:,:,channel]/plot_scale)
+            #     plt.show()
+
+        return(image_transposed)
 
 def load_tiff_image(fn, plot=False, plot_scale=1):
 
@@ -133,7 +163,21 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
 
     order = {'R': 0, 'G': 1, 'B': 2, 'NIR': 3, 'PAN': 4, 'UDM': 5}
     valid_suffixes = [f".{band}.tif" for band in order.keys()] # only want the bands included here to be combined
-    tiff_files = [f for f in tiff_files if any(f.endswith(suffix) for suffix in valid_suffixes)]
+    valid_tiff_files = [f for f in tiff_files if any(f.endswith(suffix) for suffix in valid_suffixes)]
+    invalid_tiff_files = [f for f in tiff_files if f not in valid_tiff_files]
+    tiff_files = valid_tiff_files
+
+    print(invalid_tiff_files)
+
+    for fn in invalid_tiff_files:
+        splits = os.path.basename(fn).split('.')
+        suffix = f'.{splits[-2]}.{splits[-1]}'
+        timestamp = get_timestamp(fn) 
+        timestamp_str = convert_raw_timestamp(timestamp_str=timestamp, satname=satname) # using one timestamp format for all satelittes
+        save_path = os.path.join(os.path.dirname(fn), f'{satname}_{timestamp_str}{suffix}') # this gets rid of the LC08 or what ever other weird addition there is in the data
+        print(fn)
+        print(save_path)
+        shutil.move(fn, save_path)
 
 
     # NOTE: sometimes for sentinel imagery it downloads duplicates of bands with the second one being empty
