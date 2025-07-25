@@ -43,9 +43,10 @@ def channel_name_to_band(channel_name, satname, reverse=False):
             'G': 'B2',          # Green
             'R': 'B3',          # Red
             'NIR': 'B4', # Near Infrared
-            'PAN': 'B8', # this is used for panchromatic sharpening
             'swir1': 'B5',      # SWIR
+            'TIR': 'B6', # Thermal infrared
             'swir2': 'B7',      # SWIR
+            'PAN': 'B8', # this is used for panchromatic sharpening
             'UDM': 'QA_PIXEL'   # QA Band for cloud/shadow
         },
         
@@ -55,9 +56,10 @@ def channel_name_to_band(channel_name, satname, reverse=False):
             'G': 'B2',          # Green
             'R': 'B3',          # Red
             'NIR': 'B4', # Near Infrared
-            'PAN': 'B8', # this is used for panchromatic sharpening
             'swir1': 'B5',      # SWIR
+            'TIR': 'B6', # Thermal infrared
             'swir2': 'B7',      # SWIR
+            'PAN': 'B8', # this is used for panchromatic sharpening
             'UDM': 'QA_PIXEL'   # QA Band for cloud/shadow
         },
         
@@ -67,9 +69,10 @@ def channel_name_to_band(channel_name, satname, reverse=False):
             'G': 'B3',          # Green
             'R': 'B4',          # Red
             'NIR': 'B5', # Near Infrared
-            'PAN': 'B8', # this is used for panchromatic sharpening
             'swir1': 'B6',      # SWIR
             'swir2': 'B7',      # SWIR
+            'PAN': 'B8', # this is used for panchromatic sharpening
+            'TIR': 'ST_B10', # corrected surface temperature
             'UDM': 'QA_PIXEL'   # QA Band for cloud/shadow
         },
         
@@ -79,9 +82,10 @@ def channel_name_to_band(channel_name, satname, reverse=False):
             'G': 'B3',          # Green
             'R': 'B4',          # Red
             'NIR': 'B5', # Near Infrared
-            'PAN': 'B8', # this is used for panchromatic sharpening
             'swir1': 'B6',      # SWIR
             'swir2': 'B7',      # SWIR
+            'PAN': 'B8', # this is used for panchromatic sharpening
+            'TIR': 'ST_B10', # corrected surface temperature
             'UDM': 'QA_PIXEL'   # QA Band for cloud/shadow
         },
         
@@ -117,7 +121,7 @@ def channel_name_to_band(channel_name, satname, reverse=False):
             raise ValueError(f"Invalid channel name '{channel_name}' for satellite '{satname}'")
 
 
-def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, polygon=None, satnames:list=['L4', 'L5', 'L7', 'L8', 'L9', 'S2'], proccess_downloads:bool=True):
+def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, polygon=None, satnames:list=['L4', 'L5', 'L7', 'L8', 'L9', 'S2'], proccess_downloads:bool=True, specific_band_requests:dict=None):
     """
     Download imagery for a given site (if no polygon loads sitename file)
 
@@ -128,6 +132,7 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
     :param polygon: 2d list [longitude1, latitude1], [longitude2, latitude2], [longitude3, latitude3], [longitude4, latitude4]] NOTE does not need to be a rectangle
     :param satnames: list of strs the names of the satellites that we want to download imagery from
     :param proccess_downloads: bool if True then run tiffutils.clean_up_gee_downloads
+    :param specific_band_requests: dict with satname and then what bands are requested if not None then this overwrites satnames
     """
 
 
@@ -171,21 +176,30 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
     }
 
 
+    if not specific_band_requests is None:
+        satnames = list(specific_band_requests.keys())
     for satname in satnames:
         if satname in sat_dict:
             sat_info = sat_dict[satname]
-            bands = [
-                channel_name_to_band('R', satname), 
-                channel_name_to_band('G', satname), 
-                channel_name_to_band('B', satname), 
-                channel_name_to_band('NIR', satname),
-                channel_name_to_band('UDM', satname) # NOTE dont want this for everytyhing because sentinel has wrong shape
-            ]
-            if not 'S' in satname and not satname == 'L5':
-                # landsat 5 doesnt have panchromatic band
-                # NOTE for sentinel the udm is like 8.99 m resolution while the rest is 10 m so explicitly ask for it in 10 m
-                # bands.append(channel_name_to_band('UDM', satname)) # landsat the udm should be in the right resolution naturally
-                bands.append(channel_name_to_band('PAN', satname)) # only landsat imagery has pan chromatic band
+            if not specific_band_requests is None:
+                # download the specifically requested bands
+                bands = []
+                for band in specific_band_requests[satname]:
+                    bands.append(channel_name_to_band(band, satname))
+
+            else:
+                bands = [
+                    channel_name_to_band('R', satname), 
+                    channel_name_to_band('G', satname), 
+                    channel_name_to_band('B', satname), 
+                    channel_name_to_band('NIR', satname),
+                    channel_name_to_band('UDM', satname) # NOTE dont want this for everytyhing because sentinel has wrong shape
+                ]
+                if not 'S' in satname and not satname == 'L5':
+                    # landsat 5 doesnt have panchromatic band
+                    # NOTE for sentinel the udm is like 8.99 m resolution while the rest is 10 m so explicitly ask for it in 10 m
+                    # bands.append(channel_name_to_band('UDM', satname)) # landsat the udm should be in the right resolution naturally
+                    bands.append(channel_name_to_band('PAN', satname)) # only landsat imagery has pan chromatic band
             
             
             # print(f'These are the bands for {satname}----------------------------------------')
