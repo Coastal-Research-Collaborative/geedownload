@@ -161,6 +161,7 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
 
     # qa_band_Landsat = 'QA_PIXEL'
     # qa_band_S2 = 'QA60'
+    # NOTE Default not actually ysed really
     sat_dict = {
         'L5': {'start_year': None, 'end_year': None, 'collection': 'LANDSAT/LT05/C02/T1_TOA'},
         'L7': {'start_year': None, 'end_year': 2022, 'collection': 'LANDSAT/LE07/C02/T1_TOA'},
