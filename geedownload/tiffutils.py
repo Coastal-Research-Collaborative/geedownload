@@ -59,11 +59,9 @@ def load_single_band_tiff_image(fn, plot=False, plot_scale=1):
             max_val = image_transposed.max()
 
 
-            fig, axes = plt.subplots(nrows=1, ncols=1, figsize=(10, 20))
-            axes.imshow(image_transposed/plot_scale)
-            axes.set_title(f'{os.path.basename(fn)}, {image_transposed.shape}\n min:{min_val}, max:{max_val}')
-    
-            fig.show()
+            plt.imshow(image_transposed/plot_scale)
+            plt.title(f'{os.path.basename(fn)}, {image_transposed.shape}\n min:{min_val:0.2f}, max:{max_val:0.2f}')
+            plt.colorbar()
             plt.show()
 
             # for channel in range(image_transposed.shape[2]):
