@@ -57,7 +57,7 @@ def channel_name_to_band(channel_name, satname, reverse=False):
             'R': 'B3',          # Red
             'NIR': 'B4', # Near Infrared
             'swir1': 'B5',      # SWIR
-            'TIR': 'B6', # Thermal infrared
+            'TIR': 'B6_VCID_1', # Thermal infrared
             'swir2': 'B7',      # SWIR
             'PAN': 'B8', # this is used for panchromatic sharpening
             'UDM': 'QA_PIXEL'   # QA Band for cloud/shadow
@@ -133,6 +133,7 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
     :param satnames: list of strs the names of the satellites that we want to download imagery from
     :param proccess_downloads: bool if True then run tiffutils.clean_up_gee_downloads
     :param specific_band_requests: dict with satname and then what bands are requested if not None then this overwrites satnames
+    NOTE the combine bands function in tiffutils will only combine RGB NIR PAN and UDM all others will be left as their own bands
     """
 
 
@@ -254,7 +255,7 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                             'bands': bands
                         })
                     except Exception(e):
-                        print('download url image.getDownloadURL issue')
+                        print('download url image.getDownloadURL issue. it it mentions size reduce tile size')
                         print(e)
                     # print(f'Downloading these bands {bands}')
                     # print(f"Download URL: {download_url}")
