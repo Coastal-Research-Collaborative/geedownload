@@ -6,8 +6,11 @@ import numpy as np
 import rasterio
 
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 import matplotlib.colors as mcolors
 from matplotlib.patches import Patch
+from PIL import Image
+
 
 
 
@@ -63,11 +66,9 @@ def add_mask_to_ax(ax, target, classes=None, title='Class Regions', add_legend=T
         ax.legend(handles=legend_patches, bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
 
 
-
-
-def visualize_normalized_image(normalized_image: np.ndarray) -> np.ndarray:
+def visualize_normalized_image(normalized_image: np.ndarray, brightness: float = 0.2) -> np.ndarray:
     """
-    Stretches a standardized image to a viewable 0-1 range for visualization.
+    Stretches a standardized image to a viewable 0-1 range for visualization with brightness adjustment.
     
     This is for display purposes only and should NOT be used for training.
     """
@@ -78,9 +79,11 @@ def visualize_normalized_image(normalized_image: np.ndarray) -> np.ndarray:
     # Apply a Min-Max scaling to the normalized data
     stretched_image = (normalized_image - min_vals) / (max_vals - min_vals)
     
+    # Add the brightness term
+    stretched_image = stretched_image + brightness
+    
     # Clip values to ensure they are within the 0-1 range
     return np.clip(stretched_image, 0, 1)
-
 
 def plot_tiff_img(tiff_fn, ax=None):
     with rasterio.open(tiff_fn) as dataset: tiff_array = dataset.read()
@@ -142,70 +145,134 @@ def plot_tiff_img_extra_bands(rgb_tiff_fn, extra_tiff_fns, extra_band_names):
     plt.show()
 
 
-def plot_satellite_bands(file_list):
+def apply_viridis_colormap(image_array):
     """
-    Plots satellite bands from a mixed list of multi-band and single-band TIFFs.
+    Applies the viridis colormap to a single-band image array.
+    """
+    normalized_array = (image_array - np.min(image_array)) / (np.max(image_array) - np.min(image_array))
+    colormap = cm.get_cmap('viridis')
+    viridis_array = colormap(normalized_array)
+    return viridis_array[:, :, :3]
+
+def plot_satellite_bands(file_list, crop_dim=None, save_dir=None):
+    """
+    Plots and optionally saves satellite bands to a specified directory.
+    Plots single-band images with the viridis colormap.
 
     Parameters:
     - file_list (list): A list of file paths. Assumes one multi-band file
                         and several single-band files, identifiable by name.
+    - crop_dim (int, optional): The side length for a square crop. If provided,
+                                all images will be cropped to this dimension.
+    - save_dir (str, optional): The directory to save the cropped and separated
+                                bands as PNG files.
     """
-    # Separate the files based on their names
     multiband_file = None
     singleband_files = []
     
     for f in file_list:
         if '.tif' in f and 'swir' not in f:
-            # Assumes the multi-band file is the one without "swir" in the name
             multiband_file = f
         elif 'swir' in f:
-            # Assumes single-band files have "swir" in their name
             singleband_files.append(f)
             
-    # Raise an error if the multi-band file isn't found
     if not multiband_file:
         raise FileNotFoundError("Could not find the multi-band TIFF file (e.g., '...tif' without 'swir').")
     
-    # Sort the single-band files to ensure consistent plotting order
     singleband_files.sort()
     
-    # Determine the number of subplots
-    num_subplots = 1 + len(singleband_files)
+    with rasterio.open(multiband_file) as src:
+        multiband_array_raw = src.read()
+    
+    if crop_dim:
+        height, width = multiband_array_raw.shape[1], multiband_array_raw.shape[2]
+        start_h = max(0, (height - crop_dim) // 2)
+        start_w = max(0, (width - crop_dim) // 2)
+        multiband_array = multiband_array_raw[:, start_h:start_h + crop_dim, start_w:start_w + crop_dim]
+    else:
+        multiband_array = multiband_array_raw
+
+    swir_arrays = []
+    swir_names = []
+    for swir_file in singleband_files:
+        with rasterio.open(swir_file) as src:
+            swir_array_raw = src.read(1)
+            
+            if crop_dim:
+                height, width = swir_array_raw.shape[0], swir_array_raw.shape[1]
+                start_h = max(0, (height - crop_dim) // 2)
+                start_w = max(0, (width - crop_dim) // 2)
+                swir_array = swir_array_raw[start_h:start_h + crop_dim, start_w:start_w + crop_dim]
+            else:
+                swir_array = swir_array_raw
+            
+            swir_arrays.append(swir_array)
+            band_name = os.path.basename(swir_file).split('.')[1].upper()
+            swir_names.append(band_name)
+
+    # Convert multiband array for plotting/saving
+    multiband_array_transposed = np.transpose(multiband_array, (1, 2, 0))
+    
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
+        base_name = os.path.basename(multiband_file).split('.')[0]
+
+        # Save RGB composite
+        rgb_composite_array = multiband_array_transposed[:, :, [0, 1, 2]]
+        # Use your new function for a better visual result
+        visualized_rgb = visualize_normalized_image(rgb_composite_array)
+        Image.fromarray((visualized_rgb * 255).astype(np.uint8)).save(os.path.join(save_dir, f'{base_name}_rgb.png'))
+
+        # Save individual RGB channels
+        channel_names = ['blue', 'green', 'red']
+        for i, name in enumerate(channel_names):
+            # Transpose to (H, W, C) for visualization function
+            single_channel_array_transposed = np.expand_dims(multiband_array[i, :, :], axis=-1)
+            
+            # Use your new function and apply viridis colormap
+            visualized_channel = visualize_normalized_image(single_channel_array_transposed)
+            viridis_channel = apply_viridis_colormap(visualized_channel[:, :, 0])
+            
+            # Convert to uint8 for saving
+            Image.fromarray((viridis_channel * 255).astype(np.uint8)).save(os.path.join(save_dir, f'{base_name}_{name}.png'))
+            
+
+        # Save NIR band
+        nir_array = multiband_array[3, :, :]
+        viridis_nir = apply_viridis_colormap(nir_array)
+        Image.fromarray((viridis_nir * 255).astype(np.uint8)).save(os.path.join(save_dir, f'{base_name}_nir.png'))
+        
+        for i, swir_array in enumerate(swir_arrays):
+            # Save SWIR bands
+            viridis_swir = apply_viridis_colormap(swir_array)
+            Image.fromarray((viridis_swir * 255).astype(np.uint8)).save(os.path.join(save_dir, f'{base_name}_{swir_names[i].lower()}.png'))
+            
+    num_subplots = 2 + len(swir_arrays)
     fig, axes = plt.subplots(1, num_subplots, figsize=(5 * num_subplots, 5))
     
-    # Handle single subplot case
     if num_subplots == 1:
         axes = [axes]
-        
-    # Plot the multi-band TIFF (RGB and NIR)
-    with rasterio.open(multiband_file) as src:
-        # Read the first 4 bands for RGB and NIR
-        tiff_array = src.read([1, 2, 3, 4])
-        tiff_array = np.transpose(tiff_array, (1, 2, 0))
     
-    # Plot RGB
-    axes[0].imshow(rescale_image_intensity(tiff_array[:, :, [0, 1, 2]]))
+    axes[0].imshow(visualize_normalized_image(multiband_array_transposed[:, :, [0, 1, 2]]))
     axes[0].set_title('RGB Image')
 
-    # Plot NIR
-    # Note: If your .tif file has RGB as bands 1,2,3 and NIR as band 4, this is correct.
-    axes[1].imshow(rescale_image_intensity(tiff_array[:, :, 3]))
+    axes[1].imshow(multiband_array_transposed[:, :, 3], cmap='viridis')
     axes[1].set_title('NIR Band')
     
-    # Plot the single-band SWIR TIFFs
-    for i, swir_file in enumerate(singleband_files):
-        with rasterio.open(swir_file) as src:
-            swir_array = src.read(1)
-            
-            # Extract band name from filename for title (e.g., "swir1" or "swir2")
-            band_name = os.path.basename(swir_file).split('.')[1].upper()
-            
-            axes[i + 2].imshow(rescale_image_intensity(swir_array))
-            axes[i + 2].set_title(f'{band_name} Band')
+    for i, swir_array in enumerate(swir_arrays):
+        axes[i + 2].imshow(swir_array, cmap='viridis')
+        axes[i + 2].set_title(f'{swir_names[i]} Band')
     
     plt.tight_layout()
     plt.show()
 
+# Example usage
+# file_list = [
+#     'data\\sat_images\\michigangreatbearlake\\S2\\S2_20240804_162839.swir1.tif',
+#     'data\\sat_images\\michigangreatbearlake\\S2\\S2_20240804_162839.swir2.tif',
+#     'data\\sat_images\\michigangreatbearlake\\S2\\S2_20240804_162839.tif'
+# ]
+# plot_satellite_bands(file_list, crop_dim=512, save_dir='media')
 
 import skimage.exposure as exposure
 

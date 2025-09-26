@@ -1,7 +1,7 @@
 data/
 *.json
 *.geojson
-
+media/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
