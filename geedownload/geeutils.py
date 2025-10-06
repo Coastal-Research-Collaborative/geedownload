@@ -46,7 +46,7 @@ def channel_name_to_band(channel_name, satname, reverse=False):
             'swir1': 'B5',      # SWIR
             'TIR': 'B6', # Thermal infrared
             'swir2': 'B7',      # SWIR
-            'PAN': 'B8', # this is used for panchromatic sharpening
+            # 'PAN': 'B8', # this is used for panchromatic sharpening NOTE L5 does not have this band
             'UDM': 'QA_PIXEL'   # QA Band for cloud/shadow
         },
         
@@ -270,7 +270,7 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
 
                     try:
                         response = requests.get(download_url)
-                    except Exception(e):
+                    except Exception as e:
                         print('what is going on? requests.get exception')
                         print(e)
 
