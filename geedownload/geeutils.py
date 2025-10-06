@@ -99,7 +99,9 @@ def channel_name_to_band(channel_name, satname, reverse=False):
             'NIR': 'B8', # Near Infrared
             'swir1': 'B11',     # SWIR1
             'swir2': 'B12',     # SWIR2
-            'UDM': 'QA10' # past work says this is basically the udm but it says not available'S2Cloudless' # Cloud Mask (using S2Cloudless algorithm)
+            'UDM':'QA60' # SCL is not really avalable for much imager
+            # 'UDM': 'SCL' # this is the correctUDM band QA10 isnt really anything NOTE if SCL isnt abaible use QA60
+            # 'UDM': 'QA10' # past work says this is basically the udm but it says not available'S2Cloudless' # Cloud Mask (using S2Cloudless algorithm)
         }
     }
 
@@ -256,7 +258,7 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                             'region': aoi.getInfo(),
                             'bands': bands
                         })
-                    except Exception(e):
+                    except Exception as e:
                         print('download url image.getDownloadURL issue. it it mentions size reduce tile size')
                         print(e)
                     # print(f'Downloading these bands {bands}')
