@@ -140,6 +140,7 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
     NOTE the combine bands function in tiffutils will only combine RGB NIR PAN and UDM all others will be left as their own bands
     """
 
+    imagery_downloaded=False
 
     authenticate_and_initialize() # authenticate and initialize gee
 
@@ -323,7 +324,7 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
 
                         os.remove(zip_filename) # remove zip file
 
-
+                        imagery_downloaded = True # if any imagery is downloaded
                         # tiffutils.combine_tiffs(tiff_files=this_image_component_fns, output_dir=....need to implement accepting none for this) # for each image combine band tiffs into one tiff file
                     else:
                         print(f"Failed to download file. Status code: {response.status_code}")
