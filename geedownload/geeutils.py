@@ -334,6 +334,10 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
     if proccess_downloads:
         tiffutils.clean_up_gee_downloads(download_folder)
 
+    if imagery_downloaded:
+        return True
+    return False
+
 
 def create_polygon_geojson(sitename:str, coords:list, data_dir:str='data'):
     """
