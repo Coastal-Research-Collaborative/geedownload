@@ -125,7 +125,7 @@ def channel_name_to_band(channel_name, satname, reverse=False):
             raise ValueError(f"Invalid channel name '{channel_name}' for satellite '{satname}'")
 
 
-def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, polygon=None, satnames:list=['L4', 'L5', 'L7', 'L8', 'L9', 'S2'], proccess_downloads:bool=True, specific_band_requests:dict=None):
+def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, polygon=None, satnames:list=['L4', 'L5', 'L7', 'L8', 'L9', 'S2'], proccess_downloads:bool=True, specific_band_requests:dict=None, max_cloud_percent:int=20):
     """
     Download imagery for a given site (if no polygon loads sitename file)
 
@@ -137,6 +137,7 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
     :param satnames: list of strs the names of the satellites that we want to download imagery from
     :param proccess_downloads: bool if True then run tiffutils.clean_up_gee_downloads
     :param specific_band_requests: dict with satname and then what bands are requested if not None then this overwrites satnames
+    :param max_cloud_percent: int (or float) max percent of the image that can be covered by clouds
     NOTE the combine bands function in tiffutils will only combine RGB NIR PAN and UDM all others will be left as their own bands
     """
 
@@ -215,7 +216,9 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
 
             collection = (ee.ImageCollection(sat_info['collection'])
                           .filterDate(start_date, end_date)
-                          .filterBounds(aoi))
+                          .filterBounds(aoi)
+                          .filterMetadata('CLOUD_COVER', 'less_than', max_cloud_percent)
+                        )
             # Check if the collection is not empty
             try:
                 n_images = collection.size().getInfo()
