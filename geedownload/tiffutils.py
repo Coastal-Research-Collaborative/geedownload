@@ -186,7 +186,7 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
     tuple of four ints
     """
 
-    order = {'R': 0, 'G': 1, 'B': 2, 'NIR': 3, 'PAN': 4, 'UDM': 5}
+    order = {'R': 0, 'G': 1, 'B': 2, 'NIR': 3, 'PAN': 4, 'UDM': 5, 'SWIR1':6, 'SWIR2':7}
     valid_suffixes = [f".{band}.tif" for band in order.keys()] # only want the bands included here to be combined
     valid_tiff_files = [f for f in tiff_files if any(f.endswith(suffix) for suffix in valid_suffixes)]
     invalid_tiff_files = [f for f in tiff_files if f not in valid_tiff_files]
@@ -251,7 +251,10 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
             if 'NIR' in datasets_dict_list[i]['filename']:
                 # NIR band is sometimes pansharpened and sometimes not (not sure which to do)
                 pan_sharpen = False
-            temp_dataset = datasets_dict_list[i]['dataset']
+            if 'SWIR' in datasets_dict_list[i]['filename']:
+                resample_method = 'bilinear'
+                pan_sharpen = False
+            # temp_dataset = datasets_dict_list[i]['dataset']
             datasets_dict_list[i]['dataset'] = resample_in_memory(
                             input_dataset=datasets_dict_list[i]['dataset'],
                             target_dataset=pan_dataset_dict['dataset'],
@@ -337,7 +340,7 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
 
 
         # write each file (band) as a separate layer in the output dataset
-        band_descriptions = ['Red', 'Green', 'Blue', 'NIR', 'UDM']
+        band_descriptions = ['Red', 'Green', 'Blue', 'NIR', 'UDM', 'SWIR1', 'SWIR2']
         for idx, ds in enumerate(datasets, start=1):
             band_data = ds.GetRasterBand(1).ReadAsArray()
             if scale:

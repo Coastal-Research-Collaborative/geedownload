@@ -43,9 +43,9 @@ def channel_name_to_band(channel_name, satname, reverse=False):
             'G': 'B2',          # Green
             'R': 'B3',          # Red
             'NIR': 'B4', # Near Infrared
-            'swir1': 'B5',      # SWIR
+            'SWIR1': 'B5',      # SWIR
             'TIR': 'B6', # Thermal infrared
-            'swir2': 'B7',      # SWIR
+            'SWIR2': 'B7',      # SWIR
             # 'PAN': 'B8', # this is used for panchromatic sharpening NOTE L5 does not have this band
             'UDM': 'QA_PIXEL'   # QA Band for cloud/shadow
         },
@@ -56,9 +56,9 @@ def channel_name_to_band(channel_name, satname, reverse=False):
             'G': 'B2',          # Green
             'R': 'B3',          # Red
             'NIR': 'B4', # Near Infrared
-            'swir1': 'B5',      # SWIR
+            'SWIR1': 'B5',      # SWIR
             'TIR': 'B6_VCID_1', # Thermal infrared
-            'swir2': 'B7',      # SWIR
+            'SWIR2': 'B7',      # SWIR
             'PAN': 'B8', # this is used for panchromatic sharpening
             'UDM': 'QA_PIXEL'   # QA Band for cloud/shadow
         },
@@ -69,8 +69,8 @@ def channel_name_to_band(channel_name, satname, reverse=False):
             'G': 'B3',          # Green
             'R': 'B4',          # Red
             'NIR': 'B5', # Near Infrared
-            'swir1': 'B6',      # SWIR
-            'swir2': 'B7',      # SWIR
+            'SWIR1': 'B6',      # SWIR
+            'SWIR2': 'B7',      # SWIR
             'PAN': 'B8', # this is used for panchromatic sharpening
             'TIR': 'B10', # themal infrared 
             'TIR2': 'B11',
@@ -83,8 +83,8 @@ def channel_name_to_band(channel_name, satname, reverse=False):
             'G': 'B3',          # Green
             'R': 'B4',          # Red
             'NIR': 'B5', # Near Infrared
-            'swir1': 'B6',      # SWIR
-            'swir2': 'B7',      # SWIR
+            'SWIR1': 'B6',      # SWIR
+            'SWIR2': 'B7',      # SWIR
             'PAN': 'B8', # this is used for panchromatic sharpening
             'TIR': 'B10', # themal infrared 
             'TIR2': 'B11',
@@ -97,8 +97,8 @@ def channel_name_to_band(channel_name, satname, reverse=False):
             'G': 'B3',          # Green
             'R': 'B4',          # Red
             'NIR': 'B8', # Near Infrared
-            'swir1': 'B11',     # SWIR1
-            'swir2': 'B12',     # SWIR2
+            'SWIR1': 'B11',     # SWIR1
+            'SWIR2': 'B12',     # SWIR2
             'UDM':'QA60' # SCL is not really avalable for much imager
             # 'UDM': 'SCL' # this is the correctUDM band QA10 isnt really anything NOTE if SCL isnt abaible use QA60
             # 'UDM': 'QA10' # past work says this is basically the udm but it says not available'S2Cloudless' # Cloud Mask (using S2Cloudless algorithm)
