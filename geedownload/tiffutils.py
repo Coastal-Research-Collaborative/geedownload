@@ -186,7 +186,7 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
     tuple of four ints
     """
 
-    order = {'R': 0, 'G': 1, 'B': 2, 'NIR': 3, 'PAN': 4, 'UDM': 5, 'SWIR1':6, 'SWIR2':7}
+    order = {'R': 0, 'G': 1, 'B': 2, 'NIR': 3, 'PAN': 4, 'UDM': 5, 'SWIR1':6, 'SWIR2':7, 'TIR':8}
     valid_suffixes = [f".{band}.tif" for band in order.keys()] # only want the bands included here to be combined
     valid_tiff_files = [f for f in tiff_files if any(f.endswith(suffix) for suffix in valid_suffixes)]
     invalid_tiff_files = [f for f in tiff_files if f not in valid_tiff_files]
@@ -340,7 +340,7 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
 
 
         # write each file (band) as a separate layer in the output dataset
-        band_descriptions = ['Red', 'Green', 'Blue', 'NIR', 'UDM', 'SWIR1', 'SWIR2']
+        band_descriptions = ['Red', 'Green', 'Blue', 'NIR', 'UDM', 'SWIR1', 'SWIR2', 'TIR']
         for idx, ds in enumerate(datasets, start=1):
             band_data = ds.GetRasterBand(1).ReadAsArray()
             if scale:
