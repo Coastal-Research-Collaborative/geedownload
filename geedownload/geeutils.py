@@ -122,7 +122,7 @@ def channel_name_to_band(channel_name, satname, reverse=False):
         if channel_name in sat_dict[satname]:
             return sat_dict[satname][channel_name]
         else:
-            raise ValueError(f"Invalid channel name '{channel_name}' for satellite '{satname}'")
+            raise ValueError(f"Invalid channel name '{channel_name}' for satellite '{satname}'\n{sat_dict[satname]}")
 
 
 def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, polygon=None, satnames:list=['L4', 'L5', 'L7', 'L8', 'L9', 'S2'], proccess_downloads:bool=True, specific_band_requests:dict=None, max_cloud_percent:int=20):
