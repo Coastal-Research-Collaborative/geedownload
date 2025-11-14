@@ -213,12 +213,14 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
             # print(bands)
 
                 
-
+            cloud_cover_term = 'CLOUD_COVER'
+            if satname == 'S2': cloud_cover_term = 'CLOUDY_PIXEL_PERCENTAGE'
             collection = (ee.ImageCollection(sat_info['collection'])
                           .filterDate(start_date, end_date)
                           .filterBounds(aoi)
-                          .filterMetadata('CLOUD_COVER', 'less_than', max_cloud_percent)
+                          .filterMetadata(cloud_cover_term, 'less_than', max_cloud_percent)
                         )
+            
             # Check if the collection is not empty
             try:
                 n_images = collection.size().getInfo()
