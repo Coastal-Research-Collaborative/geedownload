@@ -265,7 +265,7 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                             'bands': bands
                         })
                     except Exception as e:
-                        print('download url image.getDownloadURL issue. it it mentions size reduce tile size')
+                        print('download url image.getDownloadURL issue. it it mentions size, reduce tile size')
                         print(e)
                     # print(f'Downloading these bands {bands}')
                     # print(f"Download URL: {download_url}")
@@ -344,10 +344,22 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
     return False
 
 
-def create_polygon_geojson(sitename:str, coords:list, data_dir:str='data'):
+def create_polygon_geojson(sitename:str, coords:list, data_dir:str='data', overwrite:bool=False):
     """
     Given a list of lat long coordinates this creates a polygon function used in the imagery download process
     """
+
+    save_dir = os.path.join(data_dir, 'siteinfo', sitename)
+    if not os.path.exists(save_dir): 
+        os.makedirs(save_dir)
+    
+    save_path = os.path.join(save_dir, f"{sitename}_polygon.geojson")
+
+    if not overwrite and os.path.exists(save_path):
+        print(f'Polygon geojson already exists at {save_path} and overwrite is set to False so not overwriting')
+        return
+    
+
     if coords[0] != coords[-1]:
         coords.append(coords[0])  # Close the polygon by repeating the first coordinate
 
@@ -383,11 +395,6 @@ def create_polygon_geojson(sitename:str, coords:list, data_dir:str='data'):
         ]
     }
 
-    save_dir = os.path.join(data_dir, 'siteinfo', sitename)
-    if not os.path.exists(save_dir): 
-        os.makedirs(save_dir)
-    
-    save_path = os.path.join(save_dir, f"{sitename}_polygon.geojson")
     
     with open(save_path, 'w') as geojson_file:
         json.dump(geojson_data, geojson_file, indent=4)

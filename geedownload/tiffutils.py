@@ -169,7 +169,7 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
     Arguments:
     ----------
     tiff_files : list
-        list of tiff filenames NOTE they should all be for the same image (scene)
+        list of tiff filenames NOTE they SHOULD all be for the same image (scene)
     output_path : str
         path to where the output combined tiff will be saved (if None then just same as the first tiff)
     satname : 
@@ -194,6 +194,7 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
 
     print(invalid_tiff_files)
 
+    # update names of invalid tiff files to be consistent with others
     for fn in invalid_tiff_files:
         splits = os.path.basename(fn).split('.')
         suffix = f'.{splits[-2]}.{splits[-1]}'
@@ -252,6 +253,9 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
                 # NIR band is sometimes pansharpened and sometimes not (not sure which to do)
                 pan_sharpen = False
             if 'SWIR' in datasets_dict_list[i]['filename']:
+                resample_method = 'bilinear'
+                pan_sharpen = False
+            if 'TIR' in datasets_dict_list[i]['filename']:
                 resample_method = 'bilinear'
                 pan_sharpen = False
             # temp_dataset = datasets_dict_list[i]['dataset']
@@ -340,7 +344,8 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
 
 
         # write each file (band) as a separate layer in the output dataset
-        band_descriptions = ['Red', 'Green', 'Blue', 'NIR', 'UDM', 'SWIR1', 'SWIR2', 'TIR']
+        # band_descriptions = ['Red', 'Green', 'Blue', 'NIR', 'UDM', 'SWIR1', 'SWIR2', 'TIR']
+        band_descriptions = [os.path.basename(f).split('.')[-2] for f in tiff_files]
         for idx, ds in enumerate(datasets, start=1):
             band_data = ds.GetRasterBand(1).ReadAsArray()
             if scale:
