@@ -367,13 +367,26 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
 
     # this is done even if we cant combine the channels
     # close datasets to release resources -------------------------------------------------
-    for ds in datasets:
-        ds.FlushCache()
-        ds = None  # close input files
-        del ds  # Ensure reference is deleted
+    # for ds in datasets:
+    #     ds.FlushCache()
+    #     ds = None  # close input files
+    #     del ds  # Ensure reference is deleted
 
+    # del datasets
+    # gc.collect() # this is neccesary to avoid permission issue with deleting original file
+
+    for i in range(len(datasets)):
+        datasets[i].FlushCache()
+        datasets[i] = None
     del datasets
-    gc.collect() # this is neccesary to avoid permission issue with deleting original file
+    # also clear datasets_dict_list references
+    for item in datasets_dict_list:
+        if item.get('dataset') is not None:
+            item['dataset'].FlushCache()
+            item['dataset'] = None
+    del datasets_dict_list
+    
+    gc.collect()
 
     if delete_original_files:
         for tiff in tiff_files:
@@ -692,6 +705,10 @@ def del_leftover_band_files(data_dir):
         if '.PAN.tif' in tiff_fn:
             delete = True
         if '.UDM.tif' in tiff_fn:
+            delete = True
+        if '.SWIR1.tif' in tiff_fn:
+            delete = True
+        if '.SWIR2.tif' in tiff_fn:
             delete = True
         
         if delete:
