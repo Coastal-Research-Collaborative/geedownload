@@ -13,6 +13,7 @@ import requests
 import zipfile 
 import json
 import numpy as np
+import math
 
 from geedownload import tiffutils # used for cleaning up downloaded imagery files
 
@@ -123,6 +124,25 @@ def channel_name_to_band(channel_name, satname, reverse=False):
             return sat_dict[satname][channel_name]
         else:
             raise ValueError(f"Invalid channel name '{channel_name}' for satellite '{satname}'\n{sat_dict[satname]}")
+        
+
+#### handling too large AOI requests ####
+def estimate_tile_count(bbox, scale_m, n_bands=4, dtype_bytes=2):
+    """
+    Estimate how many tiles we need to stay under GEE's ~48MB limit.
+    bbox: (min_lon, min_lat, max_lon, max_lat)
+    """
+    min_lon, min_lat, max_lon, max_lat = bbox
+    # Approximate pixel counts
+    lat_m = (max_lat - min_lat) * 111_320
+    lon_m = (max_lon - min_lon) * 111_320 * math.cos(math.radians((min_lat + max_lat) / 2))
+    n_pixels = (lat_m / scale_m) * (lon_m / scale_m)
+    total_bytes = n_pixels * n_bands * dtype_bytes
+    limit_bytes = 48 * 1024 * 1024  # 48 MB to be safe
+    n_tiles = math.ceil(total_bytes / limit_bytes)
+    # Round up to a perfect square grid
+    grid_side = math.ceil(math.sqrt(n_tiles))
+    return grid_side
 
 
 def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, polygon=None, satnames:list=['L4', 'L5', 'L7', 'L8', 'L9', 'S2'], proccess_downloads:bool=True, specific_band_requests:dict=None, max_cloud_percent:int=20):
@@ -254,9 +274,6 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                     #     image = image.addBands(udm_resampled) # Add the resampled UDM band back to the image
                     #     bands.append(udm_band) # Add the UDM band back to the list of bands to export
 
-
-
-
                     # Prepare download URL
                     try:
                         download_url = image.getDownloadURL({
@@ -267,6 +284,32 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                     except Exception as e:
                         print('download url image.getDownloadURL issue. it it mentions size, reduce tile size')
                         print(e)
+                        if 'Total request size (' in str(e) and '50331648' in str(e):
+                            # this means the AOI is too big so it needs to be broken up into multiple AOIs
+                            coords = aoi.bounds().getInfo()['coordinates'][0]
+                            lons = [c[0] for c in coords]
+                            lats = [c[1] for c in coords]
+                            bbox = (min(lons), min(lats), max(lons), max(lats))
+                            print(coords)
+                            scale = 15
+                            if satname == 'S2':
+                                scale = 10
+                            elif satname == 'L5':
+                                scale = 30
+                            grid_side = estimate_tile_count(
+                                bbox,
+                                scale_m=scale,
+                                n_bands=len(bands),
+                                dtype_bytes=2  # int16 for Sentinel, bump to 4 for float32
+                            )
+                            print(f"  Grid: {grid_side}×{grid_side} = {grid_side**2} tiles")
+
+
+                        print('what is this')
+
+
+
+
                     # print(f'Downloading these bands {bands}')
                     # print(f"Download URL: {download_url}")
 
