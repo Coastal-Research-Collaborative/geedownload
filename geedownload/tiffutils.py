@@ -209,10 +209,12 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
     # NOTE: sometimes for sentinel imagery it downloads duplicates of bands with the second one being empty
     tiff_files = remove_duplicate_band_files(fns = tiff_files, timestamp=None) # this returns the files that are good and removes the ones that are bad/duplicates (and deletes them)
     
-    
+    # if satname is None: 
+    #     satname = os.path.basename(os.path.dirname(tiff_files[0]))
     if output_path is None:
-        raise('Not implemented output_path needs to be given for  combine_tiffs cannot be none')
-        output_path = os.path.dirname(tiff_files[0]) # this function is set up to take fns from the same folder so this works
+        # raise('Not implemented output_path needs to be given for  combine_tiffs cannot be none')
+        file_name_str = os.path.basename(tiff_files[0]).split('.')[0]
+        output_path = os.path.join(os.path.dirname(tiff_files[0]), f'{file_name_str}.tif') # this function is set up to take fns from the same folder so this works
 
     if resample:
         # seperate pan sharpened band
