@@ -211,14 +211,11 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
         timestamp = get_timestamp(fn) 
         timestamp_str = convert_raw_timestamp(timestamp_str=timestamp, satname=satname) # using one timestamp format for all satelittes
         save_path = os.path.join(os.path.dirname(fn), f'{satname}_{timestamp_str}{suffix}') # this gets rid of the LC08 or what ever other weird addition there is in the data
-        print(fn)
-        print(save_path)
         shutil.move(fn, save_path)
 
 
     # NOTE: sometimes for sentinel imagery it downloads duplicates of bands with the second one being empty
     tiff_files = remove_duplicate_band_files(fns = tiff_files, timestamp=None) # this returns the files that are good and removes the ones that are bad/duplicates (and deletes them)
-    print(tiff_files)
     
     # if satname is None: 
     #     satname = os.path.basename(os.path.dirname(tiff_files[0]))
@@ -241,7 +238,6 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
             tiff_files = [file for file in tiff_files if not file.endswith('.PAN.tif')]
 
     tiff_files = sorted(tiff_files, key=lambda x: order[x.split('.')[-2]]) # only for man images
-    print(tiff_files)
     # Open all TIFF files as datasets
 
     datasets_dict_list = [{'filename': tiff, 'dataset': gdal.Open(tiff)} for tiff in tiff_files]
@@ -364,7 +360,7 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
         output_dataset.SetGeoTransform(ref_dataset.GetGeoTransform())
         output_dataset.SetProjection(ref_dataset.GetProjection())
 
-        print(f'*****************************{len(tiff_files)=} if rescale')
+        # print(f'*****************************{len(tiff_files)=} if rescale')
 
 
         # write each file (band) as a separate layer in the output dataset
@@ -403,7 +399,6 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
 
     if delete_original_files:
         failed_to_delete = []
-        print(tiff_files)
         for tiff in tiff_files:
             try:
                 os.remove(tiff)
@@ -451,18 +446,21 @@ def get_timestamp(fn, convert_format=False) -> str:
     satname = first_split[0]
     # print(satname)
          
-    if satname.startswith('S') or 'S2' in long_fn:
+    if satname.startswith('S') or 'S2' in long_fn or '_T' in fn:
         # Sentinel is in this format S2_20191101T000241_20191101T000243_T56HLH.B where the first time is start of aquisition and the second is end of aquizition in utc time (e.i when its processed on the ground)
         timestamp_str = fn.split('_')[1] # using start of image aquisition timestamp
-    elif satname.startswith('L'):
+    elif satname.startswith('L') or 'LC' in fn:
         # Landsat L7_LE07_089083_20191114.B where 08 is the hour and 2019 is year etc.
-        timestamp = first_split[2]
+        if len(first_split) == 4:
+            timestamp = first_split[2]
+        else:
+            timestamp = first_split[-2] # incase there is no satname in the fn
         date = first_split[-1].split('.')[0]
         timestamp_str = f'{timestamp}_{date}'   
 
 
     if convert_format:
-        convert_raw_timestamp(timestamp_str, satname)
+        timestamp_str = convert_raw_timestamp(timestamp_str, satname)
 
     # print(date)
     # print(timestamp)
@@ -470,10 +468,16 @@ def get_timestamp(fn, convert_format=False) -> str:
 
 
 def convert_raw_timestamp(timestamp_str, satname):
-    if satname.startswith('S'):
+    # this converts it to a standardized format
+
+    if satname.startswith('S') or 'T' in timestamp_str:
         date, time = timestamp_str.split('T')
         timestamp_str = f'{date}_{time}'
     elif satname.startswith('L'):
+        time, date = timestamp_str.split('_')
+        timestamp_str = f'{date}_{time}'
+    else:
+        # assume this must be landsat (NOTE could check the format better using re)
         time, date = timestamp_str.split('_')
         timestamp_str = f'{date}_{time}'
 
