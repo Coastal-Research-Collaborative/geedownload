@@ -14,6 +14,11 @@ import zipfile
 import json
 import numpy as np
 import math
+import rasterio
+from rasterio.merge import merge
+from rasterio.transform import from_bounds
+import tempfile
+from pathlib import Path
 
 from geedownload import tiffutils # used for cleaning up downloaded imagery files
 
@@ -144,6 +149,213 @@ def estimate_tile_count(bbox, scale_m, n_bands=4, dtype_bytes=2):
     grid_side = math.ceil(math.sqrt(n_tiles))
     return grid_side
 
+
+def make_tile_grid(bbox, grid_side, overlap_deg=0.001):
+    """
+    Split bbox into a grid_side x grid_side grid of overlapping tiles.
+    overlap_deg prevents seam artifacts at tile edges.
+    """
+    min_lon, min_lat, max_lon, max_lat = bbox
+    lon_step = (max_lon - min_lon) / grid_side
+    lat_step = (max_lat - min_lat) / grid_side
+
+    tiles = []
+    for row in range(grid_side):
+        for col in range(grid_side):
+            t_min_lon = min_lon + col * lon_step - overlap_deg
+            t_max_lon = min_lon + (col + 1) * lon_step + overlap_deg
+            t_min_lat = min_lat + row * lat_step - overlap_deg
+            t_max_lat = min_lat + (row + 1) * lat_step + overlap_deg
+
+            # Clamp to original bbox
+            tiles.append((
+                max(t_min_lon, min_lon),
+                max(t_min_lat, min_lat),
+                min(t_max_lon, max_lon),
+                min(t_max_lat, max_lat),
+            ))
+    return tiles
+
+
+def mosaic_tiles(tile_paths: list, out_path: str):
+    """
+    Merge a list of GeoTIFF tile paths into a single output GeoTIFF.
+    Uses rasterio.merge which handles overlapping regions by taking the
+    first valid pixel (no blending seams).
+    """
+    datasets = [rasterio.open(p) for p in tile_paths]
+
+    mosaic, transform = merge(datasets)
+
+    # Copy metadata from first tile
+    meta = datasets[0].meta.copy()
+    meta.update({
+        "driver": "GTiff",
+        "height": mosaic.shape[1],
+        "width": mosaic.shape[2],
+        "transform": transform,
+        "compress": "lzw",       # lossless compression
+        "tiled": True,
+        "blockxsize": 256,
+        "blockysize": 256,
+    })
+
+    for ds in datasets:
+        ds.close()
+
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+    with rasterio.open(out_path, "w", **meta) as dest:
+        dest.write(mosaic)
+
+
+def download_large_AOI_in_seperate_tiles(sitename:str, satname:str, bands:dict, aoi, image, image_id):
+    coords = aoi.bounds().getInfo()['coordinates'][0]
+    lons = [c[0] for c in coords]
+    lats = [c[1] for c in coords]
+    bbox = (min(lons), min(lats), max(lons), max(lats))
+    print(coords)
+    if satname == 'S2':
+        scale, dtype_bytes = 10, 2   # uint16
+    elif satname in ('L5', 'L7'):
+        scale, dtype_bytes = 30, 2
+    elif satname in ('L8', 'L9'):
+        scale, dtype_bytes = 30, 4   # float32 — this was the underestimate bug
+    else:
+        scale, dtype_bytes = 30, 4
+    grid_side = estimate_tile_count(
+        bbox,
+        scale_m=scale,
+        n_bands=len(bands),
+        dtype_bytes=dtype_bytes  # int16 for Sentinel, bump to 4 for float32
+    )
+    print(f"  Grid: {grid_side}×{grid_side} = {grid_side**2} tiles")\
+    
+    tiles = make_tile_grid(bbox, grid_side)
+    print(tiles)
+
+    temp_download_folder = os.path.join('data', 'sat_images', sitename, f'{satname}_tiled')
+    os.makedirs(temp_download_folder, exist_ok=True)
+    tile_paths = []
+
+    for i, (min_lon, min_lat, max_lon, max_lat) in enumerate(tiles):
+        tile_region = ee.Geometry.Rectangle([min_lon, min_lat, max_lon, max_lat])
+        # image_id_tile = f"{image_id}_tile_{i}"
+        # tile_path = os.path.join(temp_download_folder, image_id_tile)
+        for attempt in range(3):
+            try:    
+                try:
+                    url = image.getDownloadURL({
+                        'scale': scale,
+                        'region': tile_region.getInfo(),
+                        'bands': bands,
+                    })
+                    print(f"  URL generated OK: {url[:80]}...")
+                except Exception as e:
+                    print('❌ getDownloadURL failed — tile still too big?')
+                    print(e)
+                    break  # no point retrying if URL generation itself failed
+
+                download_single_image(sitename=sitename, 
+                                      satname=satname,
+                                      download_url=url,
+                                      image_id=image_id,
+                                    #   alternate_save_path=temp_download_folder # should actually save to the regular place
+                                      )
+
+
+            except rasterio.errors.RasterioIOError as e:
+                print(e)
+                print(f"  ✗ Tile {i+1} attempt {attempt+1}: file not a valid GeoTIFF — likely GEE returned an error body. {e}")
+                # if os.path.exists(tile_path):
+                #     os.remove(tile_path)  # delete corrupt file so it doesn't get reused
+            except Exception as e:
+                print(e)
+                print(f"  ✗ Tile {i+1} attempt {attempt+1}: {e}")
+                # if os.path.exists(tile_path):
+                #     os.remove(tile_path)
+
+
+    # ✅ These are now OUTSIDE the for loop — mosaic after ALL tiles downloaded
+    if not tile_paths:
+        raise RuntimeError("All tiles failed to download — cannot mosaic.")
+
+    print(f"  Mosaicking {len(tile_paths)} tiles...")
+    mosaic_path = os.path.join(temp_download_folder, "mosaic.tif")
+    mosaic_tiles(tile_paths, mosaic_path)
+
+    for p in tile_paths:
+        os.remove(p)
+
+    print(f"  ✓ Mosaic saved to {mosaic_path}")
+    return mosaic_path
+
+
+
+
+def download_single_image(sitename:str, satname:str, download_url, image_id, alternate_save_path=None):
+    try:
+        response = requests.get(download_url)
+    except Exception as e:
+        print('what is going on? requests.get exception')
+        print(e)
+
+    # Check if the request was successful (status code 200)
+    if response.status_code == 200:
+        # create download folder
+        if alternate_save_path is None:
+            download_folder_satname = os.path.join('data', 'sat_images', sitename, satname) # sitename dir was already mad
+        else:
+            download_folder_satname = alternate_save_path
+        os.makedirs(download_folder_satname, exist_ok=True) # make sure the download folder exists before saving the file
+
+        # change zip filename to include the satname at the beginning and avoid nested folders
+        image_id_fn = image_id.split("/")[-1]
+        zip_filename = os.path.join(download_folder_satname, f'{image_id_fn}_image.zip')
+        
+        with open(zip_filename, 'wb') as f:
+            f.write(response.content)
+        # print(f"File downloaded successfully as {zip_filename}")
+
+        # Unzip the file into the download folder
+        with zipfile.ZipFile(zip_filename, 'r') as zip_ref:
+            zip_ref.extractall(download_folder_satname)  # Extract directly into the download folder
+        # print(f"File unzipped successfully into {download_folder_satname}")
+
+        # prepend satelite name to file names and replace channel with the actual channel
+        this_image_component_fns = [] # these are each of the band names for the 
+        for file_path in glob(os.path.join(download_folder_satname, f'*{image_id_fn}*')):
+            if file_path.endswith('.zip'): continue # This is the zip file we took them out of
+            short_fn = os.path.basename(file_path)
+            # print(short_fn)
+            period_split = short_fn.split('.')
+            band = period_split[1] # last one is file extention
+            short_fn_no_band = period_split[0] # removes extention and band
+            # print(band)
+            try:
+                short_fn = f'{short_fn_no_band}.{channel_name_to_band(channel_name=band, satname=satname, reverse=True)}'
+            except ValueError:
+                # For some satellites it may just 
+                short_fn = f'{short_fn_no_band}.{band}' # names are already set to have the correct band name so no need reverse it
+            # print(short_fn)
+
+            new_filename = os.path.join(os.path.dirname(file_path), f"{satname}_{short_fn}.tif")
+
+            if not file_path == new_filename: 
+                if os.path.exists(new_filename):
+                    # this mostlikely means this data was already downloaded
+                    os.remove(new_filename) # NOTE it will now get overridden
+                os.rename(file_path, new_filename) # NOTE done by resampling for landsat
+            
+            this_image_component_fns.append(new_filename) # save band file to list so fns can all be combined
+
+
+        os.remove(zip_filename) # remove zip file
+
+        imagery_downloaded = True # if any imagery is downloaded
+        tiffutils.combine_tiffs(tiff_files=this_image_component_fns) # for each image combine band tiffs into one tiff file
+    else:
+        print(f"Failed to download file. Status code: {response.status_code}")
+    
 
 def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, polygon=None, satnames:list=['L4', 'L5', 'L7', 'L8', 'L9', 'S2'], proccess_downloads:bool=True, specific_band_requests:dict=None, max_cloud_percent:int=20):
     """
@@ -276,8 +488,16 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
 
                     # Prepare download URL
                     try:
+                        if satname == 'S2':
+                            scale, dtype_bytes = 10, 2   # uint16
+                        elif satname in ('L5', 'L7'):
+                            scale, dtype_bytes = 30, 2
+                        elif satname in ('L8', 'L9'):
+                            scale, dtype_bytes = 30, 4   # float32 — this was the underestimate bug
+                        else:
+                            scale, dtype_bytes = 30, 4
                         download_url = image.getDownloadURL({
-                            'scale': 10,
+                            'scale': scale,
                             'region': aoi.getInfo(),
                             'bands': bands
                         })
@@ -286,29 +506,10 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                         print(e)
                         if 'Total request size (' in str(e) and '50331648' in str(e):
                             # this means the AOI is too big so it needs to be broken up into multiple AOIs
-                            coords = aoi.bounds().getInfo()['coordinates'][0]
-                            lons = [c[0] for c in coords]
-                            lats = [c[1] for c in coords]
-                            bbox = (min(lons), min(lats), max(lons), max(lats))
-                            print(coords)
-                            scale = 15
-                            if satname == 'S2':
-                                scale = 10
-                            elif satname == 'L5':
-                                scale = 30
-                            grid_side = estimate_tile_count(
-                                bbox,
-                                scale_m=scale,
-                                n_bands=len(bands),
-                                dtype_bytes=2  # int16 for Sentinel, bump to 4 for float32
-                            )
-                            print(f"  Grid: {grid_side}×{grid_side} = {grid_side**2} tiles")
-
-
-                        print('what is this')
-
-
-
+                            download_large_AOI_in_seperate_tiles(sitename=sitename, satname=satname, bands=bands, aoi=aoi, image=image, image_id=image_id)
+                            continue
+                        else:
+                            raise()
 
                     # print(f'Downloading these bands {bands}')
                     # print(f"Download URL: {download_url}")
@@ -317,65 +518,10 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                     #     # NOTE udm band needs to be removed from bands each itteration because it is added above resampled as udm_resampled
                     #     bands.remove(udm_band)
 
-                    try:
-                        response = requests.get(download_url)
-                    except Exception as e:
-                        print('what is going on? requests.get exception')
-                        print(e)
-
-                    # Check if the request was successful (status code 200)
-                    if response.status_code == 200:
-                        # create download folder
-                        download_folder_satname = os.path.join('data', 'sat_images', sitename, satname) # sitename dir was already made
-                        if not os.path.exists(download_folder_satname): os.makedirs(download_folder_satname) # make sure the download folder exists before saving the file
-
-                        # change zip filename to include the satname at the beginning and avoid nested folders
-                        image_id_fn = image_id.split("/")[-1]
-                        zip_filename = os.path.join(download_folder_satname, f'{image_id_fn}_image.zip')
-                        
-                        with open(zip_filename, 'wb') as f:
-                            f.write(response.content)
-                        # print(f"File downloaded successfully as {zip_filename}")
-
-                        # Unzip the file into the download folder
-                        with zipfile.ZipFile(zip_filename, 'r') as zip_ref:
-                            zip_ref.extractall(download_folder_satname)  # Extract directly into the download folder
-                        # print(f"File unzipped successfully into {download_folder_satname}")
-
-                        # prepend satelite name to file names and replace channel with the actual channel
-                        this_image_component_fns = [] # these are each of the band names for the 
-                        for file_path in glob(os.path.join(download_folder_satname, f'*{image_id_fn}*')):
-                            if file_path.endswith('.zip'): continue # This is the zip file we took them out of
-                            short_fn = os.path.basename(file_path)
-                            # print(short_fn)
-                            period_split = short_fn.split('.')
-                            band = period_split[1] # last one is file extention
-                            short_fn_no_band = period_split[0] # removes extention and band
-                            # print(band)
-                            try:
-                                short_fn = f'{short_fn_no_band}.{channel_name_to_band(channel_name=band, satname=satname, reverse=True)}'
-                            except ValueError:
-                                # For some satellites it may just 
-                                short_fn = f'{short_fn_no_band}.{band}' # names are already set to have the correct band name so no need reverse it
-                            # print(short_fn)
-
-                            new_filename = os.path.join(os.path.dirname(file_path), f"{satname}_{short_fn}.tif")
-
-                            if not file_path == new_filename: 
-                                if os.path.exists(new_filename):
-                                    # this mostlikely means this data was already downloaded
-                                    os.remove(new_filename) # NOTE it will now get overridden
-                                os.rename(file_path, new_filename) # NOTE done by resampling for landsat
-                            
-                            this_image_component_fns.append(new_filename) # save band file to list so fns can all be combined
-
-
-                        os.remove(zip_filename) # remove zip file
-
-                        imagery_downloaded = True # if any imagery is downloaded
-                        # tiffutils.combine_tiffs(tiff_files=this_image_component_fns, output_dir=....need to implement accepting none for this) # for each image combine band tiffs into one tiff file
-                    else:
-                        print(f"Failed to download file. Status code: {response.status_code}")
+                    download_single_image(sitename=sitename,
+                                         satname=satname,
+                                         download_url=download_url,
+                                         image_id=image_id)
             else:
                 print(f"No images found for {satname} in the given date range and polygon.")
 
