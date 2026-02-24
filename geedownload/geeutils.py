@@ -13,10 +13,7 @@ import requests
 import zipfile 
 import json
 import numpy as np
-import math
-import rasterio
-from rasterio.merge import merge
-from rasterio.transform import from_bounds
+import re
 import tempfile
 from pathlib import Path
 
@@ -132,162 +129,144 @@ def channel_name_to_band(channel_name, satname, reverse=False):
         
 
 #### handling too large AOI requests ####
-def estimate_tile_count(bbox, scale_m, n_bands=4, dtype_bytes=2):
+def parse_request_size_from_error(error_str: str):
     """
-    Estimate how many tiles we need to stay under GEE's ~48MB limit.
-    bbox: (min_lon, min_lat, max_lon, max_lat)
+    Extract actual and max bytes from GEE error message like:
+    'Total request size (290499705 bytes) must be less than or equal to 50331648 bytes.'
+    Returns (actual_bytes, max_bytes) or (None, None)
     """
-    min_lon, min_lat, max_lon, max_lat = bbox
-    # Approximate pixel counts
-    lat_m = (max_lat - min_lat) * 111_320
-    lon_m = (max_lon - min_lon) * 111_320 * math.cos(math.radians((min_lat + max_lat) / 2))
-    n_pixels = (lat_m / scale_m) * (lon_m / scale_m)
-    total_bytes = n_pixels * n_bands * dtype_bytes
-    limit_bytes = 48 * 1024 * 1024  # 48 MB to be safe
-    n_tiles = math.ceil(total_bytes / limit_bytes)
-    # Round up to a perfect square grid
-    grid_side = math.ceil(math.sqrt(n_tiles))
-    return grid_side
+    match = re.search(r'Total request size \((\d+) bytes\) must be less than or equal to (\d+) bytes', error_str)
+    if match:
+        return int(match.group(1)), int(match.group(2))
+    return None, None
 
-
-def make_tile_grid(bbox, grid_side, overlap_deg=0.001):
-    """
-    Split bbox into a grid_side x grid_side grid of overlapping tiles.
-    overlap_deg prevents seam artifacts at tile edges.
-    """
-    min_lon, min_lat, max_lon, max_lat = bbox
-    lon_step = (max_lon - min_lon) / grid_side
-    lat_step = (max_lat - min_lat) / grid_side
-
-    tiles = []
-    for row in range(grid_side):
-        for col in range(grid_side):
-            t_min_lon = min_lon + col * lon_step - overlap_deg
-            t_max_lon = min_lon + (col + 1) * lon_step + overlap_deg
-            t_min_lat = min_lat + row * lat_step - overlap_deg
-            t_max_lat = min_lat + (row + 1) * lat_step + overlap_deg
-
-            # Clamp to original bbox
-            tiles.append((
-                max(t_min_lon, min_lon),
-                max(t_min_lat, min_lat),
-                min(t_max_lon, max_lon),
-                min(t_max_lat, max_lat),
-            ))
-    return tiles
-
-
-def mosaic_tiles(tile_paths: list, out_path: str):
-    """
-    Merge a list of GeoTIFF tile paths into a single output GeoTIFF.
-    Uses rasterio.merge which handles overlapping regions by taking the
-    first valid pixel (no blending seams).
-    """
-    datasets = [rasterio.open(p) for p in tile_paths]
-
-    mosaic, transform = merge(datasets)
-
-    # Copy metadata from first tile
-    meta = datasets[0].meta.copy()
-    meta.update({
-        "driver": "GTiff",
-        "height": mosaic.shape[1],
-        "width": mosaic.shape[2],
-        "transform": transform,
-        "compress": "lzw",       # lossless compression
-        "tiled": True,
-        "blockxsize": 256,
-        "blockysize": 256,
-    })
-
-    for ds in datasets:
-        ds.close()
-
-    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
-    with rasterio.open(out_path, "w", **meta) as dest:
-        dest.write(mosaic)
 
 
 def download_large_AOI_in_seperate_tiles(sitename:str, satname:str, bands:dict, aoi, image, image_id):
+
+    if satname == 'S2':
+        scale = 10
+    elif satname in ('L5', 'L7', 'L8', 'L9'):
+        scale = 30
+    else:
+        scale = 30
+
+    # --- Calculate how many slices we need -----------------------------------
+    if size_error_str:
+        actual_bytes, max_bytes = parse_request_size_from_error(size_error_str)
+        if actual_bytes and max_bytes:
+            # e.g. 290MB / 50MB = 5.8 → need 6 slices to guarantee each is under limit
+            n_slices = math.ceil(actual_bytes / max_bytes)
+            print(f"  Image is {actual_bytes/1e6:.1f} MB, limit is {max_bytes/1e6:.1f} MB → need {n_slices} slices")
+        else:
+            n_slices = 4  # fallback
+    else:
+        n_slices = 4
+
+    # --- Get AOI bounds -------------------------------------------------------
     coords = aoi.bounds().getInfo()['coordinates'][0]
     lons = [c[0] for c in coords]
     lats = [c[1] for c in coords]
-    bbox = (min(lons), min(lats), max(lons), max(lats))
-    print(coords)
-    if satname == 'S2':
-        scale, dtype_bytes = 10, 2   # uint16
-    elif satname in ('L5', 'L7'):
-        scale, dtype_bytes = 30, 2
-    elif satname in ('L8', 'L9'):
-        scale, dtype_bytes = 30, 4   # float32 — this was the underestimate bug
+    min_lon, max_lon = min(lons), max(lons)
+    min_lat, max_lat = min(lats), max(lats)
+
+    # Approximate width and height in metres
+    lat_mid = (min_lat + max_lat) / 2
+    width_m  = (max_lon - min_lon) * 111_320 * math.cos(math.radians(lat_mid))
+    height_m = (max_lat - min_lat) * 111_320
+
+    # --- Slice orthogonal to the longest side --------------------------------
+    if width_m >= height_m:
+        # Cut vertically (slice along longitude)
+        print(f"  Slicing vertically (width {width_m/1000:.1f} km > height {height_m/1000:.1f} km) into {n_slices} strips")
+        lon_edges = np.linspace(min_lon, max_lon, n_slices + 1)
+        slices = [
+            (lon_edges[i], min_lat, lon_edges[i+1], max_lat)
+            for i in range(n_slices)
+        ]
     else:
-        scale, dtype_bytes = 30, 4
-    grid_side = estimate_tile_count(
-        bbox,
-        scale_m=scale,
-        n_bands=len(bands),
-        dtype_bytes=dtype_bytes  # int16 for Sentinel, bump to 4 for float32
-    )
-    print(f"  Grid: {grid_side}×{grid_side} = {grid_side**2} tiles")\
-    
-    tiles = make_tile_grid(bbox, grid_side)
-    print(tiles)
+        # Cut horizontally (slice along latitude)
+        print(f"  Slicing horizontally (height {height_m/1000:.1f} km > width {width_m/1000:.1f} km) into {n_slices} strips")
+        lat_edges = np.linspace(min_lat, max_lat, n_slices + 1)
+        slices = [
+            (min_lon, lat_edges[i], max_lon, lat_edges[i+1])
+            for i in range(n_slices)
+        ]
 
-    temp_download_folder = os.path.join('data', 'sat_images', sitename, f'{satname}_tiled')
-    os.makedirs(temp_download_folder, exist_ok=True)
-    tile_paths = []
+    print(f"  Slices: {slices}")
 
-    for i, (min_lon, min_lat, max_lon, max_lat) in enumerate(tiles):
-        tile_region = ee.Geometry.Rectangle([min_lon, min_lat, max_lon, max_lat])
-        # image_id_tile = f"{image_id}_tile_{i}"
-        # tile_path = os.path.join(temp_download_folder, image_id_tile)
+    # --- Download each slice as a normal image --------------------------------
+    downloaded_image_ids = []
+
+    for i, (s_min_lon, s_min_lat, s_max_lon, s_max_lat) in enumerate(slices):
+        tile_region = ee.Geometry.Rectangle([s_min_lon, s_min_lat, s_max_lon, s_max_lat])
+        image_id_tile = f"{image_id}_tile_{i}"
+        success = False
+
         for attempt in range(3):
-            try:    
-                try:
-                    url = image.getDownloadURL({
-                        'scale': scale,
-                        'region': tile_region.getInfo(),
-                        'bands': bands,
-                    })
-                    print(f"  URL generated OK: {url[:80]}...")
-                except Exception as e:
-                    print('❌ getDownloadURL failed — tile still too big?')
-                    print(e)
-                    break  # no point retrying if URL generation itself failed
+            try:
+                url = image.getDownloadURL({
+                    'scale': scale,
+                    'region': tile_region.getInfo(),
+                    'bands': bands,
+                })
+                print(f"  Tile {i+1}/{n_slices} URL OK")
 
-                download_single_image(sitename=sitename, 
-                                      satname=satname,
-                                      download_url=url,
-                                      image_id=image_id,
-                                    #   alternate_save_path=temp_download_folder # should actually save to the regular place
-                                      )
+                download_single_image(
+                    sitename=sitename,
+                    satname=satname,
+                    download_url=url,
+                    image_id=image_id_tile,
+                )
+                downloaded_image_ids.append(image_id_tile)
+                print(f"  ✓ Tile {i+1}/{n_slices} downloaded")
+                success = True
+                break
 
-
-            except rasterio.errors.RasterioIOError as e:
-                print(e)
-                print(f"  ✗ Tile {i+1} attempt {attempt+1}: file not a valid GeoTIFF — likely GEE returned an error body. {e}")
-                # if os.path.exists(tile_path):
-                #     os.remove(tile_path)  # delete corrupt file so it doesn't get reused
             except Exception as e:
-                print(e)
                 print(f"  ✗ Tile {i+1} attempt {attempt+1}: {e}")
-                # if os.path.exists(tile_path):
-                #     os.remove(tile_path)
 
+        if not success:
+            print(f"  ⚠ Skipping tile {i+1}/{n_slices} after 3 attempts")
 
-    # ✅ These are now OUTSIDE the for loop — mosaic after ALL tiles downloaded
-    if not tile_paths:
-        raise RuntimeError("All tiles failed to download — cannot mosaic.")
+    if not downloaded_image_ids:
+        raise RuntimeError("All tiles failed — cannot mosaic.")
 
-    print(f"  Mosaicking {len(tile_paths)} tiles...")
-    mosaic_path = os.path.join(temp_download_folder, "mosaic.tif")
-    mosaic_tiles(tile_paths, mosaic_path)
+    # --- Mosaic the downloaded tiles back together ---------------------------
+    sat_dir = os.path.join('data', 'sat_images', sitename, satname)
+    
+    # Get all unique band labels from the downloaded tiles
+    # Tiles save as e.g. L8_<image_id_tile>.<band>.tif
+    first_tile_id = downloaded_image_ids[0].split("/")[-1]
+    band_files_example = glob(os.path.join(sat_dir, f'{satname}_{first_tile_id}.*.tif'))
+    band_labels = [os.path.basename(f).split('.')[-2] for f in band_files_example]
+    print(f"  Bands to mosaic: {band_labels}")
 
-    for p in tile_paths:
-        os.remove(p)
+    for band in band_labels:
+        tile_band_paths = []
+        for tile_id in downloaded_image_ids:
+            tile_id_fn = tile_id.split("/")[-1]
+            p = os.path.join(sat_dir, f'{satname}_{tile_id_fn}.{band}.tif')
+            if os.path.exists(p):
+                tile_band_paths.append(p)
+            else:
+                print(f"  ⚠ Missing tile file: {p}")
 
-    print(f"  ✓ Mosaic saved to {mosaic_path}")
-    return mosaic_path
+        if not tile_band_paths:
+            print(f"  ⚠ No tile files found for band {band}, skipping")
+            continue
+
+        mosaic_out = os.path.join(sat_dir, f'{satname}_{image_id.split("/")[-1]}.{band}.tif')
+        print(f"  Mosaicking {len(tile_band_paths)} tiles for band {band} → {mosaic_out}")
+        mosaic_tiles(tile_band_paths, mosaic_out)
+
+        # Clean up tile files
+        for p in tile_band_paths:
+            os.remove(p)
+
+    print(f"  ✓ Mosaic complete for {image_id}")
+
+       
 
 
 
