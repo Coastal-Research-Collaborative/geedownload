@@ -141,8 +141,8 @@ def parse_request_size_from_error(error_str: str):
     return None, None
 
 
-
-def download_large_AOI_in_seperate_tiles(sitename:str, satname:str, bands:dict, aoi, image, image_id):
+import math
+def download_large_AOI_in_seperate_tiles(sitename:str, satname:str, bands:dict, aoi, image, image_id, size_error_str:str):
 
     if satname == 'S2':
         scale = 10
@@ -200,78 +200,73 @@ def download_large_AOI_in_seperate_tiles(sitename:str, satname:str, bands:dict, 
 
     for i, (s_min_lon, s_min_lat, s_max_lon, s_max_lat) in enumerate(slices):
         tile_region = ee.Geometry.Rectangle([s_min_lon, s_min_lat, s_max_lon, s_max_lat])
-        image_id_tile = f"{image_id}_tile_{i}"
+        image_id_tile = f'{tiffutils.get_timestamp(image_id, convert_format=True)}_tile_{i}'
         success = False
 
-        for attempt in range(3):
-            try:
-                url = image.getDownloadURL({
-                    'scale': scale,
-                    'region': tile_region.getInfo(),
-                    'bands': bands,
-                })
-                print(f"  Tile {i+1}/{n_slices} URL OK")
+        # try:
+        url = image.getDownloadURL({
+            'scale': scale,
+            'region': tile_region.getInfo(),
+            'bands': bands,
+        })
+        print(f"  Tile {i+1}/{n_slices} URL OK")
 
-                download_single_image(
-                    sitename=sitename,
-                    satname=satname,
-                    download_url=url,
-                    image_id=image_id_tile,
-                )
-                downloaded_image_ids.append(image_id_tile)
-                print(f"  ✓ Tile {i+1}/{n_slices} downloaded")
-                success = True
-                break
+        download_single_image(
+            sitename=sitename,
+            satname=satname,
+            download_url=url,
+            image_id=image_id,
+            tile_number=i
+        )
+        downloaded_image_ids.append(image_id_tile)
+        print(f"  ✓ Tile {i+1}/{n_slices} downloaded {image_id_tile}")
+        success = True
+        # except Exception as e:
+        #     print(f"  ✗ Tile {i+1} {e}")
 
-            except Exception as e:
-                print(f"  ✗ Tile {i+1} attempt {attempt+1}: {e}")
 
         if not success:
-            print(f"  ⚠ Skipping tile {i+1}/{n_slices} after 3 attempts")
+            print(f"  ⚠ Skipping tile {i+1}/{n_slices} after 1 attempts")
 
     if not downloaded_image_ids:
         raise RuntimeError("All tiles failed — cannot mosaic.")
 
-    # --- Mosaic the downloaded tiles back together ---------------------------
-    sat_dir = os.path.join('data', 'sat_images', sitename, satname)
+    # # --- Mosaic the downloaded tiles back together ---------------------------
+    # sat_dir = os.path.join('data', 'sat_images', sitename, satname)
     
-    # Get all unique band labels from the downloaded tiles
-    # Tiles save as e.g. L8_<image_id_tile>.<band>.tif
-    first_tile_id = downloaded_image_ids[0].split("/")[-1]
-    band_files_example = glob(os.path.join(sat_dir, f'{satname}_{first_tile_id}.*.tif'))
-    band_labels = [os.path.basename(f).split('.')[-2] for f in band_files_example]
-    print(f"  Bands to mosaic: {band_labels}")
+    # # Get all unique band labels from the downloaded tiles
+    # # Tiles save as e.g. L8_<image_id_tile>.<band>.tif
+    # first_tile_id = downloaded_image_ids[0].split("/")[-1]
+    # band_files_example = glob(os.path.join(sat_dir, f'{satname}_{first_tile_id}.*.tif'))
+    # band_labels = [os.path.basename(f).split('.')[-2] for f in band_files_example]
+    # print(f"  Bands to mosaic: {band_labels}")
 
-    for band in band_labels:
-        tile_band_paths = []
-        for tile_id in downloaded_image_ids:
-            tile_id_fn = tile_id.split("/")[-1]
-            p = os.path.join(sat_dir, f'{satname}_{tile_id_fn}.{band}.tif')
-            if os.path.exists(p):
-                tile_band_paths.append(p)
-            else:
-                print(f"  ⚠ Missing tile file: {p}")
+    # # for band in band_labels:
+    # #     tile_band_paths = []
+    # #     for tile_id in downloaded_image_ids:
+    # #         tile_id_fn = tile_id.split("/")[-1]
+    # #         p = os.path.join(sat_dir, f'{satname}_{tile_id_fn}.{band}.tif')
+    # #         if os.path.exists(p):
+    # #             tile_band_paths.append(p)
+    # #         else:
+    # #             print(f"  ⚠ Missing tile file: {p}")
 
-        if not tile_band_paths:
-            print(f"  ⚠ No tile files found for band {band}, skipping")
-            continue
+    # #     if not tile_band_paths:
+    # #         print(f"  ⚠ No tile files found for band {band}, skipping")
+    # #         continue
 
-        mosaic_out = os.path.join(sat_dir, f'{satname}_{image_id.split("/")[-1]}.{band}.tif')
-        print(f"  Mosaicking {len(tile_band_paths)} tiles for band {band} → {mosaic_out}")
-        mosaic_tiles(tile_band_paths, mosaic_out)
+    # #     mosaic_out = os.path.join(sat_dir, f'{satname}_{image_id.split("/")[-1]}.{band}.tif')
+    # #     print(f"  Mosaicking {len(tile_band_paths)} tiles for band {band} → {mosaic_out}")
+    # #     mosaic_tiles(tile_band_paths, mosaic_out)
 
-        # Clean up tile files
-        for p in tile_band_paths:
-            os.remove(p)
+    # #     # Clean up tile files
+    # #     for p in tile_band_paths:
+    # #         os.remove(p)
 
-    print(f"  ✓ Mosaic complete for {image_id}")
-
-       
+    # print(f"  ✓ Mosaic complete for {image_id}")
 
 
-
-
-def download_single_image(sitename:str, satname:str, download_url, image_id, alternate_save_path=None):
+def download_single_image(sitename:str, satname:str, download_url, image_id=None, alternate_save_path=None, tile_number:int=None):
     try:
         response = requests.get(download_url)
     except Exception as e:
@@ -288,7 +283,10 @@ def download_single_image(sitename:str, satname:str, download_url, image_id, alt
         os.makedirs(download_folder_satname, exist_ok=True) # make sure the download folder exists before saving the file
 
         # change zip filename to include the satname at the beginning and avoid nested folders
-        image_id_fn = image_id.split("/")[-1]
+        # image_id_fn = image_id.split("/")[-1]
+        image_id_fn = tiffutils.get_timestamp(image_id, convert_format=True)
+
+
         zip_filename = os.path.join(download_folder_satname, f'{image_id_fn}_image.zip')
         
         with open(zip_filename, 'wb') as f:
@@ -302,13 +300,18 @@ def download_single_image(sitename:str, satname:str, download_url, image_id, alt
 
         # prepend satelite name to file names and replace channel with the actual channel
         this_image_component_fns = [] # these are each of the band names for the 
-        for file_path in glob(os.path.join(download_folder_satname, f'*{image_id_fn}*')):
+        
+        tiff_fns = glob(os.path.join(download_folder_satname, f'*{image_id_fn}*'))
+        for file_path in tiff_fns:
             if file_path.endswith('.zip'): continue # This is the zip file we took them out of
+            if 'tile' in file_path: continue # this means its already been processed (the only possibility of this is if there are multiple tiles for same image timestamp)
             short_fn = os.path.basename(file_path)
             # print(short_fn)
             period_split = short_fn.split('.')
             band = period_split[1] # last one is file extention
             short_fn_no_band = period_split[0] # removes extention and band
+            if not tile_number is None:
+                short_fn_no_band = f'{short_fn_no_band}_tile_{tile_number}'
             # print(band)
             try:
                 short_fn = f'{short_fn_no_band}.{channel_name_to_band(channel_name=band, satname=satname, reverse=True)}'
@@ -331,9 +334,12 @@ def download_single_image(sitename:str, satname:str, download_url, image_id, alt
         os.remove(zip_filename) # remove zip file
 
         imagery_downloaded = True # if any imagery is downloaded
+        print(this_image_component_fns)
         tiffutils.combine_tiffs(tiff_files=this_image_component_fns) # for each image combine band tiffs into one tiff file
     else:
         print(f"Failed to download file. Status code: {response.status_code}")
+    
+    return imagery_downloaded
     
 
 def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, polygon=None, satnames:list=['L4', 'L5', 'L7', 'L8', 'L9', 'S2'], proccess_downloads:bool=True, specific_band_requests:dict=None, max_cloud_percent:int=20):
@@ -419,10 +425,8 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                     # bands.append(channel_name_to_band('UDM', satname)) # landsat the udm should be in the right resolution naturally
                     bands.append(channel_name_to_band('PAN', satname)) # only landsat imagery has pan chromatic band
             
-            
             # print(f'These are the bands for {satname}----------------------------------------')
             # print(bands)
-
                 
             cloud_cover_term = 'CLOUD_COVER'
             if satname == 'S2': cloud_cover_term = 'CLOUDY_PIXEL_PERCENTAGE'
@@ -438,8 +442,9 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
             except ee.ee_exception.EEException as e:
                 n_images = 0 # if n_images = 0 (it will print out that this is because there are no images available)
             if n_images > 0:
-                for image in collection.getInfo()['features']: 
-                    image_id = image['id']  # Get the ID of the image to download. This is each image not each band 
+                for image in collection.getInfo()['features']:   
+                    # Get the ID of the image to download. This is each image not each band 
+                    image_id = image['id'] # something like this: COPERNICUS/S2_HARMONIZED/20250712T153559_20250712T153728_T19TCG 
                     # print(f"Processing image: {image_id}")
 
                     image = ee.Image(image_id)
@@ -485,7 +490,7 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                         print(e)
                         if 'Total request size (' in str(e) and '50331648' in str(e):
                             # this means the AOI is too big so it needs to be broken up into multiple AOIs
-                            download_large_AOI_in_seperate_tiles(sitename=sitename, satname=satname, bands=bands, aoi=aoi, image=image, image_id=image_id)
+                            download_large_AOI_in_seperate_tiles(sitename=sitename, satname=satname, bands=bands, aoi=aoi, image=image, image_id=image_id, size_error_str=str(e))
                             continue
                         else:
                             raise()

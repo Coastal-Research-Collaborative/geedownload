@@ -185,15 +185,25 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
     --------
     tuple of four ints
     """
-
     order = {'R': 0, 'G': 1, 'B': 2, 'NIR': 3, 'PAN': 4, 'UDM': 5, 'SWIR1':6, 'SWIR2':7, 'TIR':8}
     valid_suffixes = [f".{band}.tif" for band in order.keys()] # only want the bands included here to be combined
     valid_tiff_files = [f for f in tiff_files if any(f.endswith(suffix) for suffix in valid_suffixes)]
     invalid_tiff_files = [f for f in tiff_files if f not in valid_tiff_files]
     tiff_files = valid_tiff_files
-
-    print(invalid_tiff_files)
-
+    
+    print(f'{invalid_tiff_files=}')
+    if satname is None:
+        if 'S2' in valid_tiff_files[0]:
+            satname = 'S2'
+        elif 'L5' in valid_tiff_files[0]:
+            satname = 'L5'
+        elif 'L7' in valid_tiff_files[0]:
+            satname = 'L7'
+        elif 'L8' in valid_tiff_files[0]:
+            satname = 'L8'
+        elif 'L9' in valid_tiff_files[0]:
+            satname = 'L9'
+     
     # update names of invalid tiff files to be consistent with others
     for fn in invalid_tiff_files:
         splits = os.path.basename(fn).split('.')
@@ -208,6 +218,7 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
 
     # NOTE: sometimes for sentinel imagery it downloads duplicates of bands with the second one being empty
     tiff_files = remove_duplicate_band_files(fns = tiff_files, timestamp=None) # this returns the files that are good and removes the ones that are bad/duplicates (and deletes them)
+    print(tiff_files)
     
     # if satname is None: 
     #     satname = os.path.basename(os.path.dirname(tiff_files[0]))
@@ -230,6 +241,7 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
             tiff_files = [file for file in tiff_files if not file.endswith('.PAN.tif')]
 
     tiff_files = sorted(tiff_files, key=lambda x: order[x.split('.')[-2]]) # only for man images
+    print(tiff_files)
     # Open all TIFF files as datasets
 
     datasets_dict_list = [{'filename': tiff, 'dataset': gdal.Open(tiff)} for tiff in tiff_files]
@@ -268,6 +280,16 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
                             resampling_method=resample_method,
                             apply_pansharpen=pan_sharpen
                             )             
+    else:
+        # make sure that if not being resampled (sentinel 2) the datasets are still in memorry and not an open file cuz we want to delete the band files later
+        for i in range(len(datasets_dict_list)):
+            src = datasets_dict_list[i]['dataset']
+            mem_driver = gdal.GetDriverByName('MEM')
+            mem_ds = mem_driver.CreateCopy('', src)  # copy into memory
+            src.FlushCache()
+            src = None
+            datasets_dict_list[i]['dataset'] = mem_ds  # replace with MEM copy
+        gc.collect()  # force GDAL to release the file handles
     # Check that all datasets have the same CRS, bounds, and resolution
     datasets = [item.get('dataset') for item in datasets_dict_list] # extract just the datasets
     # del datasets_dict_list # we are not going to use the datasets_dict_list again
@@ -364,18 +386,8 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
 
         # close datasets to release resources -------------------------------------------------
         output_dataset.FlushCache()
-        output_dataset = None  # close output file
-       
-
-    # this is done even if we cant combine the channels
-    # close datasets to release resources -------------------------------------------------
-    # for ds in datasets:
-    #     ds.FlushCache()
-    #     ds = None  # close input files
-    #     del ds  # Ensure reference is deleted
-
-    # del datasets
-    # gc.collect() # this is neccesary to avoid permission issue with deleting original file
+        output_dataset = None # close output file
+        del output_dataset           
 
     for i in range(len(datasets)):
         datasets[i].FlushCache()
@@ -387,18 +399,37 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
             item['dataset'].FlushCache()
             item['dataset'] = None
     del datasets_dict_list
-    
     gc.collect()
 
     if delete_original_files:
+        failed_to_delete = []
+        print(tiff_files)
         for tiff in tiff_files:
             try:
                 os.remove(tiff)
             except(PermissionError):
+                print(f'Permission denied when cleaning up temp band tiffs to {os.path.basename(tiff)}...will attempt again')
+                failed_to_delete.append(tiff)
                 # This only happens for sentinel but it says permision denied
-                # print('permission denied when cleaning up temp tiff files')
                 #NOTE this should be caught somewhere else
                 _ = 0 # just place holder
+
+        # second pass — GDAL can hold handles briefly, give it a moment
+        if failed_to_delete:
+            import time
+            gc.collect()
+            time.sleep(0.5)
+            for tiff in failed_to_delete:
+                try:
+                    os.remove(tiff)
+                except PermissionError:
+                    print(f'Still permission denied after retry: {os.path.basename(tiff)} — will attempt once more at end')
+                    # Schedule for deletion on next gc cycle
+                    try:
+                        gc.collect()
+                        os.remove(tiff)
+                    except PermissionError:
+                        print(f'Could not delete {os.path.basename(tiff)} — delete manually or ignore')
 
         if resample and not pan_dataset_dict is None:
             del pan_dataset_dict
@@ -411,21 +442,24 @@ def get_timestamp(fn, convert_format=False) -> str:
     returns timestamp st in this format YYYYMMDD_HHmmSS unless fn says original format
     NOTE: takes the first of the timestamps for sentinel
     """
+    long_fn = fn
     if '/' in fn or '\\' in fn:
         # this means its a file path
         fn = os.path.basename(fn)
-    
+            
     first_split = fn.split('_')
     satname = first_split[0]
     # print(satname)
-    if satname.startswith('L'):
+         
+    if satname.startswith('S') or 'S2' in long_fn:
+        # Sentinel is in this format S2_20191101T000241_20191101T000243_T56HLH.B where the first time is start of aquisition and the second is end of aquizition in utc time (e.i when its processed on the ground)
+        timestamp_str = fn.split('_')[1] # using start of image aquisition timestamp
+    elif satname.startswith('L'):
         # Landsat L7_LE07_089083_20191114.B where 08 is the hour and 2019 is year etc.
         timestamp = first_split[2]
         date = first_split[-1].split('.')[0]
-        timestamp_str = f'{timestamp}_{date}'            
-    elif satname.startswith('S'):
-        # Sentinel is in this format S2_20191101T000241_20191101T000243_T56HLH.B where the first time is start of aquisition and the second is end of aquizition in utc time (e.i when its processed on the ground)
-        timestamp_str = fn.split('_')[1] # using start of image aquisition timestamp
+        timestamp_str = f'{timestamp}_{date}'   
+
 
     if convert_format:
         convert_raw_timestamp(timestamp_str, satname)
@@ -510,7 +544,11 @@ def resample_in_memory(input_dataset:gdal.Dataset, target_dataset:gdal.Dataset, 
             resampleAlg=resampling_method,
             targetAlignedPixels=False
         )
+        original_input = input_dataset
         input_dataset = gdal.Warp('', input_dataset, options=downsample_options)
+        original_input.FlushCache()
+        original_input = None  # ← releases the file handle on the source .tif
+        del original_input
 
     
 
@@ -634,7 +672,7 @@ def remove_duplicate_band_files(fns, timestamp=None):
     fns = [x for x in fns if not (x in seen or seen.add(x))] # NOTE if there are duplicate fns in the fns list this way it wont be propigated past this function
 
     if len(fns) == 0: 
-        raise('In tiffutils.remove_duplicate_band_files() fns has lenght 0')
+        raise ValueError('In tiffutils.remove_duplicate_band_files() fns has lenght 0')
 
     bands = set()
     fns_filtered = []
