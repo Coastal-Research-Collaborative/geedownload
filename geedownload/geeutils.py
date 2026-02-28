@@ -289,7 +289,7 @@ def download_single_image(sitename:str, satname:str, download_url, image_id=None
         # change zip filename to include the satname at the beginning and avoid nested folders
         # image_id_fn = image_id.split("/")[-1]
         image_id_fn = tiffutils.get_timestamp(image_id, convert_format=False)
-        print(image_id_fn)
+        # print(image_id_fn)
 
 
         zip_filename = os.path.join(download_folder_satname, f'{image_id_fn}_image.zip')
@@ -342,7 +342,7 @@ def download_single_image(sitename:str, satname:str, download_url, image_id=None
         os.remove(zip_filename) # remove zip file
 
         imagery_downloaded = True # if any imagery is downloaded
-        print(this_image_component_fns)
+        # print(this_image_component_fns)
         tiffutils.combine_tiffs(tiff_files=this_image_component_fns) # for each image combine band tiffs into one tiff file
     else:
         print(f"Failed to download file. Status code: {response.status_code}")
