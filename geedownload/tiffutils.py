@@ -162,6 +162,11 @@ def create_rgb_image(red_image, green_image, blue_image, scale=False):
     return rgb_image
 
 
+def get_res(ds):
+            gt = ds.GetGeoTransform()
+            return abs(gt[1]), abs(gt[5]), ds.RasterXSize, ds.RasterYSize
+
+
 def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_original_files:bool=True, resample:bool=True, scale:bool=True):
     """
     This function gets the min and max pixel boundaries of a dataset
@@ -190,9 +195,14 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
     valid_tiff_files = [f for f in tiff_files if any(f.endswith(suffix) for suffix in valid_suffixes)]
     invalid_tiff_files = [f for f in tiff_files if f not in valid_tiff_files]
     tiff_files = valid_tiff_files
+
+    if len(valid_tiff_files) == 0:
+        print('No valid fns')
+        print(f'{invalid_tiff_files=}')
     
-    print(f'{invalid_tiff_files=}')
+    # print(f'{invalid_tiff_files=}')
     if satname is None:
+        
         if 'S2' in valid_tiff_files[0]:
             satname = 'S2'
         elif 'L5' in valid_tiff_files[0]:
@@ -249,13 +259,14 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
     #     else:
     #         print(f"Filename: {item['filename']} - Dataset is None (null)")
 
+    # print(f'PAN: {get_res(pan_dataset_dict["dataset"])}')
+
     
     if resample:
         for i in range(len(datasets_dict_list)):
             # datasets does not include pan sharpened band
             resample_method = 'bilinear'
             pan_sharpen = True # Pan sharpen RGB bands
-
             if 'UDM' in datasets_dict_list[i]['filename']: 
                 resample_method = 'nearest' # use nearest neighbor for UDM
                 pan_sharpen = False # dont need pan sharpening for UDM
@@ -269,13 +280,19 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
                 resample_method = 'bilinear'
                 pan_sharpen = False
             # temp_dataset = datasets_dict_list[i]['dataset']
+            # before = get_res(datasets_dict_list[i]['dataset'])
             datasets_dict_list[i]['dataset'] = resample_in_memory(
                             input_dataset=datasets_dict_list[i]['dataset'],
                             target_dataset=pan_dataset_dict['dataset'],
                             double_res=True,  # Set to True if you want double resolution
                             resampling_method=resample_method,
                             apply_pansharpen=pan_sharpen
-                            )             
+                            )      
+
+            # after = get_res(datasets_dict_list[i]['dataset'])
+
+            # band_name = datasets_dict_list[i]['filename'].split('.')[-2]
+            # print(f'{band_name}: {before[0]:.1f}m x {before[1]:.1f}m ({before[2]}x{before[3]}px) → {after[0]:.1f}m x {after[1]:.1f}m ({after[2]}x{after[3]}px)')       
     else:
         # make sure that if not being resampled (sentinel 2) the datasets are still in memorry and not an open file cuz we want to delete the band files later
         for i in range(len(datasets_dict_list)):

@@ -41,6 +41,7 @@ def authenticate_and_initialize():
         ee.Initialize()
 
 
+
 def channel_name_to_band(channel_name, satname, reverse=False):
     """
     reverse goies from B1 etc to RGB etc
@@ -270,7 +271,7 @@ def download_large_AOI_in_seperate_tiles(sitename:str, satname:str, bands:dict, 
     return final_path
 
 
-def download_single_image(sitename:str, satname:str, download_url, image_id=None, alternate_save_path=None, tile_number:int=None):
+def download_single_image(sitename:str, satname:str, download_url, image_id=None, combine_tiff_files:bool=True, alternate_save_path=None, tile_number:int=None):
     try:
         response = requests.get(download_url)
     except Exception as e:
@@ -307,12 +308,12 @@ def download_single_image(sitename:str, satname:str, download_url, image_id=None
         this_image_component_fns = [] # these are each of the band names for the 
         
         # go through each of the bands
+        timestamp_str = tiffutils.get_timestamp(image_id, convert_format=True)
         tiff_fns = glob(os.path.join(download_folder_satname, f'*{image_id_fn}*'))
         for file_path in tiff_fns:
             if file_path.endswith('.zip'): continue # This is the zip file we took them out of
             if 'tile' in file_path: continue # this means its already been processed (the only possibility of this is if there are multiple tiles for same image timestamp)
             short_fn = os.path.basename(file_path)
-            timestamp_str = tiffutils.get_timestamp(image_id, convert_format=True)
             # print(short_fn)
             period_split = short_fn.split('.')
             band = period_split[1] # last one is file extention
@@ -340,17 +341,28 @@ def download_single_image(sitename:str, satname:str, download_url, image_id=None
 
 
         os.remove(zip_filename) # remove zip file
-
         imagery_downloaded = True # if any imagery is downloaded
-        # print(this_image_component_fns)
-        tiffutils.combine_tiffs(tiff_files=this_image_component_fns) # for each image combine band tiffs into one tiff file
+        # NOTE usually PAN is actually downloaded seperately at a different res NOTE this can become and issue with other bands down the line
+       
+        PAN_fns = glob(os.path.join(download_folder_satname, f"{satname}_{timestamp_str}.PAN.tif"))
+        if len(PAN_fns)>= 1:
+            pan_fn = PAN_fns[0]
+            if not pan_fn in this_image_component_fns:
+                this_image_component_fns.append(pan_fn)
+        if len(this_image_component_fns)==0:
+            print(f'Could not download {image_id} no image componnent fns')
+            return False # not sure what is going on
+        if combine_tiff_files == True:
+            # print(this_image_component_fns)
+            tiffutils.combine_tiffs(tiff_files=this_image_component_fns) # for each image combine band tiffs into one tiff file
+
     else:
         print(f"Failed to download file. Status code: {response.status_code}")
     
     return imagery_downloaded
     
 
-def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, specific_download_path=None, polygon=None, satnames:list=['L4', 'L5', 'L7', 'L8', 'L9', 'S2'], proccess_downloads:bool=True, specific_band_requests:dict=None, max_cloud_percent:int=20):
+def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, specific_download_path=None, polygon=None, desired_scale:int=None, satnames:list=['L4', 'L5', 'L7', 'L8', 'L9', 'S2'], proccess_downloads:bool=True, specific_band_requests:dict=None, max_cloud_percent:int=20):
     """
     Download imagery for a given site (if no polygon loads sitename file)
 
@@ -360,6 +372,7 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
     :param data_dir: str directory where sat_images/<sitename> is held. NOTE do not include sat_images or sitename in data_dir
     :param specific_download_path: str if you have a specific place you want the image downloaded not using sitename or anything use this
     :param polygon: 2d list [longitude1, latitude1], [longitude2, latitude2], [longitude3, latitude3], [longitude4, latitude4]] NOTE does not need to be a rectangle
+    :param desired_scale: int this tells GEE what res you want bands att (it will interpolate it on their end so be careful) if None it will just download in there actually res
     :param satnames: list of strs the names of the satellites that we want to download imagery from
     :param proccess_downloads: bool if True then run tiffutils.clean_up_gee_downloads
     :param specific_band_requests: dict with satname and then what bands are requested if not None then this overwrites satnames
@@ -380,7 +393,7 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
             download_folder = os.path.join(data_dir, 'sat_images', sitename)
     if not os.path.exists(download_folder): os.makedirs(download_folder)
 
-    tiffutils.clean_up_gee_downloads(download_folder) # NOTE if some imagery was download prior but clean up wasn't run or the download was stopped early this will clean up misalenious files
+    # tiffutils.clean_up_gee_downloads(download_folder) # NOTE if some imagery was download prior but clean up wasn't run or the download was stopped early this will clean up misalenious files
 
 
     if polygon is None:
@@ -484,19 +497,35 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
 
                     # Prepare download URL
                     try:
-                        if satname == 'S2':
-                            scale, dtype_bytes = 10, 2   # uint16
-                        elif satname in ('L5', 'L7'):
-                            scale, dtype_bytes = 30, 2
-                        elif satname in ('L8', 'L9'):
-                            scale, dtype_bytes = 30, 4   # float32 — this was the underestimate bug
-                        else:
-                            scale, dtype_bytes = 30, 4
-                        download_url = image.getDownloadURL({
+                        pan_url = None
+                        pan_band = channel_name_to_band('PAN', satname)
+                        non_pan_bands = [b for b in bands if b != pan_band]
+                        if desired_scale is None:
+                            if satname == 'S2':
+                                scale, dtype_bytes = 10, 2   # uint16
+                            elif satname in ('L5'):
+                                scale, dtype_bytes = 30, 2
+                            # elif satname in ('L7'):
+                            #     scale, dtype_bytes = 30, 2
+                            # elif satname in ('L8', 'L9'):
+                            #     scale, dtype_bytes = 30, 4   # float32 — this was the underestimate bug
+                            elif satname in ('L7', 'L8', 'L9') and pan_band in bands:
+                                # download pan at its higher resolution so we are ready for it
+                                pan_url = image.getDownloadURL({
+                                    'scale': 15,
+                                    'region': aoi.getInfo(),
+                                    'bands': [pan_band]
+                                })
+                                scale = 30
+                            else: 
+                                scale, dtype_bytes = 15, 4
+                            
+                            download_bands = non_pan_bands if not pan_url is None else bands
+                            download_url = image.getDownloadURL({
                             'scale': scale,
                             'region': aoi.getInfo(),
-                            'bands': bands
-                        })
+                            'bands': download_bands
+                            })
                     except Exception as e:
                         print('download url image.getDownloadURL issue. it it mentions size, reduce tile size')
                         print(e)
@@ -514,17 +543,22 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                     # if 'S' in satname:
                     #     # NOTE udm band needs to be removed from bands each itteration because it is added above resampled as udm_resampled
                     #     bands.remove(udm_band)
-
+                    if not pan_url is None:
+                        # for landsat 7, 8, 9 we use panchromatic ban for panchromatic sharpening
+                        download_single_image(sitename=sitename,
+                                         satname=satname,
+                                         download_url=pan_url,
+                                         image_id=image_id,
+                                         combine_tiff_files=False) # false cuz this is Just downloading one image
                     download_single_image(sitename=sitename,
                                          satname=satname,
                                          download_url=download_url,
                                          image_id=image_id)
             else:
                 print(f"No images found for {satname} in the given date range and polygon.")
-
+    # NOTE this function is not really needed anymore and It can make a mess
     if proccess_downloads:
         tiffutils.clean_up_gee_downloads(download_folder)
-
     if imagery_downloaded:
         return True
     return False
