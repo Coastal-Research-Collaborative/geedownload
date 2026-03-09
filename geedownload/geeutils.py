@@ -350,7 +350,7 @@ def download_single_image(sitename:str, satname:str, download_url, image_id=None
     return imagery_downloaded
     
 
-def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, polygon=None, satnames:list=['L4', 'L5', 'L7', 'L8', 'L9', 'S2'], proccess_downloads:bool=True, specific_band_requests:dict=None, max_cloud_percent:int=20):
+def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, specific_download_path=None, polygon=None, satnames:list=['L4', 'L5', 'L7', 'L8', 'L9', 'S2'], proccess_downloads:bool=True, specific_band_requests:dict=None, max_cloud_percent:int=20):
     """
     Download imagery for a given site (if no polygon loads sitename file)
 
@@ -358,6 +358,7 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
     :param start_date: str "YYY-MM-DD" 
     :param end_date: str "YYY-MM-DD" 
     :param data_dir: str directory where sat_images/<sitename> is held. NOTE do not include sat_images or sitename in data_dir
+    :param specific_download_path: str if you have a specific place you want the image downloaded not using sitename or anything use this
     :param polygon: 2d list [longitude1, latitude1], [longitude2, latitude2], [longitude3, latitude3], [longitude4, latitude4]] NOTE does not need to be a rectangle
     :param satnames: list of strs the names of the satellites that we want to download imagery from
     :param proccess_downloads: bool if True then run tiffutils.clean_up_gee_downloads
@@ -370,10 +371,13 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
 
     authenticate_and_initialize() # authenticate and initialize gee
 
-    if data_dir is  None:
-        download_folder = os.path.join('data', 'sat_images', sitename)
+    if not specific_download_path is None:
+        download_folder = specific_download_path
     else:
-        download_folder = os.path.join(data_dir, 'sat_images', sitename)
+        if data_dir is  None:
+            download_folder = os.path.join('data', 'sat_images', sitename)
+        else:
+            download_folder = os.path.join(data_dir, 'sat_images', sitename)
     if not os.path.exists(download_folder): os.makedirs(download_folder)
 
     tiffutils.clean_up_gee_downloads(download_folder) # NOTE if some imagery was download prior but clean up wasn't run or the download was stopped early this will clean up misalenious files
