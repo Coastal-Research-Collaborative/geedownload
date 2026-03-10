@@ -499,10 +499,19 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
 
                     # Prepare download URL
                     try:
-                        pan_url = None
-                        pan_band = channel_name_to_band('PAN', satname)
-                        non_pan_bands = [b for b in bands if b != pan_band]
-                        if desired_scale is None:
+                        pan_url = None # already set to none
+                        if not desired_scale is None:
+                            # then all the bands at the desired scale
+                            download_url = image.getDownloadURL({
+                            'scale': desired_scale,
+                            'region': aoi.getInfo(),
+                            'bands': bands
+                            })
+                        elif 'L' in satname and desired_scale is None: # already checked if desired scale is None
+                            # NOTE only landsat has the pan chromatic band stuff
+                            # only landsat imagery has the panchromatic band and needs to worry about this
+                            pan_band = channel_name_to_band('PAN', satname)
+                            non_pan_bands = [b for b in bands if b != pan_band]
                             if satname == 'S2':
                                 scale, dtype_bytes = 10, 2   # uint16
                             elif satname in ('L5'):
@@ -521,21 +530,21 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                                 scale = 30
                             else: 
                                 scale, dtype_bytes = 15, 4
-                            
-                            download_bands = non_pan_bands if not pan_url is None else bands
+                                
+                                download_bands = non_pan_bands if not pan_url is None else bands
+                                download_url = image.getDownloadURL({
+                                'scale': scale,
+                                'region': aoi.getInfo(),
+                                'bands': download_bands
+                                })
+                        else:
+                            # NOTE this would be sentinel imagery with no desired scale
                             download_url = image.getDownloadURL({
                             'scale': scale,
                             'region': aoi.getInfo(),
-                            'bands': download_bands
-                            })
-                        else:
-                            # then all the bands at the desired scale
-                            pan_url = None # already set to none
-                            download_url = image.getDownloadURL({
-                            'scale': desired_scale,
-                            'region': aoi.getInfo(),
                             'bands': bands
                             })
+                       
                     except Exception as e:
                         print('download url image.getDownloadURL issue. it it mentions size, reduce tile size')
                         print(e)
