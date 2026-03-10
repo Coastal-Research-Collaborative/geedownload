@@ -559,10 +559,12 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                                          satname=satname,
                                          download_url=pan_url,
                                          image_id=image_id,
+                                         alternate_save_path=specific_download_path,
                                          combine_tiff_files=False) # false cuz this is Just downloading one image
                     download_single_image(sitename=sitename,
                                          satname=satname,
                                          download_url=download_url,
+                                         alternate_save_path=specific_download_path,
                                          image_id=image_id)
             else:
                 print(f"No images found for {satname} in the given date range and polygon.")
