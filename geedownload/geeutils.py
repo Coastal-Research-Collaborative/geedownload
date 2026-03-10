@@ -526,6 +526,14 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                             'region': aoi.getInfo(),
                             'bands': download_bands
                             })
+                        else:
+                            # then all the bands at the desired scale
+                            pan_url = None # already set to none
+                            download_url = image.getDownloadURL({
+                            'scale': desired_scale,
+                            'region': aoi.getInfo(),
+                            'bands': bands
+                            })
                     except Exception as e:
                         print('download url image.getDownloadURL issue. it it mentions size, reduce tile size')
                         print(e)
