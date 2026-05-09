@@ -433,8 +433,6 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
         if satname in sat_dict:
             sat_info = sat_dict[satname]
             if not specific_band_requests is None:
-                print(satname)
-                print(specific_band_requests[satname])
                 # download the specifically requested bands
                 bands = []
                 for band in specific_band_requests[satname]:
