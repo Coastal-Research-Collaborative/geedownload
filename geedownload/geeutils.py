@@ -433,6 +433,8 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
         if satname in sat_dict:
             sat_info = sat_dict[satname]
             if not specific_band_requests is None:
+                print(satname)
+                print(specific_band_requests[satname])
                 # download the specifically requested bands
                 bands = []
                 for band in specific_band_requests[satname]:
@@ -508,39 +510,38 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                             'bands': bands
                             })
                         elif 'L' in satname and desired_scale is None: # already checked if desired scale is None
-                            # NOTE only landsat has the pan chromatic band stuff
-                            # only landsat imagery has the panchromatic band and needs to worry about this
-                            pan_band = channel_name_to_band('PAN', satname)
-                            non_pan_bands = [b for b in bands if b != pan_band]
-                            if satname == 'S2':
-                                scale, dtype_bytes = 10, 2   # uint16
-                            elif satname in ('L5'):
-                                scale, dtype_bytes = 30, 2
-                            # elif satname in ('L7'):
-                            #     scale, dtype_bytes = 30, 2
-                            # elif satname in ('L8', 'L9'):
-                            #     scale, dtype_bytes = 30, 4   # float32 — this was the underestimate bug
-                            elif satname in ('L7', 'L8', 'L9') and pan_band in bands:
-                                # download pan at its higher resolution so we are ready for it
-                                pan_url = image.getDownloadURL({
-                                    'scale': 15,
-                                    'region': aoi.getInfo(),
-                                    'bands': [pan_band]
-                                })
-                                scale = 30
-                            else: 
-                                scale, dtype_bytes = 15, 4
-                                
-                                download_bands = non_pan_bands if not pan_url is None else bands
+                            # Panchromatic band exists only on L7, L8, L9 — never call channel_name_to_band('PAN', …) for L5.
+                            if satname in ('L7', 'L8', 'L9'):
+                                pan_band = channel_name_to_band('PAN', satname)
+                                non_pan_bands = [b for b in bands if b != pan_band]
+                                if pan_band in bands:
+                                    pan_url = image.getDownloadURL({
+                                        'scale': 15,
+                                        'region': aoi.getInfo(),
+                                        'bands': [pan_band]
+                                    })
+                                    download_url = image.getDownloadURL({
+                                        'scale': 30,
+                                        'region': aoi.getInfo(),
+                                        'bands': non_pan_bands
+                                    })
+                                else:
+                                    download_url = image.getDownloadURL({
+                                        'scale': 30,
+                                        'region': aoi.getInfo(),
+                                        'bands': bands
+                                    })
+                            else:
+                                # L5 (and any Landsat without PAN): single export at 30 m multispectral resolution
                                 download_url = image.getDownloadURL({
-                                'scale': scale,
-                                'region': aoi.getInfo(),
-                                'bands': download_bands
+                                    'scale': 30,
+                                    'region': aoi.getInfo(),
+                                    'bands': bands
                                 })
                         else:
-                            # NOTE this would be sentinel imagery with no desired scale
+                            # NOTE sentinel imagery with no desired scale (native ~10 m)
                             download_url = image.getDownloadURL({
-                            'scale': scale,
+                            'scale': 10,
                             'region': aoi.getInfo(),
                             'bands': bands
                             })
