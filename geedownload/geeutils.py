@@ -136,6 +136,11 @@ def channel_name_to_band(channel_name, satname, reverse=False):
         
 
 #### handling too large AOI requests ####
+def _is_gee_download_size_error(exc: BaseException) -> bool:
+    s = str(exc)
+    return 'Total request size (' in s and '50331648' in s
+
+
 def parse_request_size_from_error(error_str: str):
     """
     Extract actual and max bytes from GEE error message like:
@@ -164,8 +169,8 @@ def download_large_AOI_in_seperate_tiles(sitename:str, satname:str, bands:dict, 
             # e.g. 290MB / 50MB = 5.8 → need 6 slices to guarantee each is under limit
             # n_slices = math.ceil(actual_bytes / max_bytes) # this assumes not overhead
             # n_slices = math.ceil(actual_bytes / max_bytes) + 1  # +1 buffer for metadata etc
-            n_slices = math.ceil(actual_bytes / (max_bytes * 0.75))  # target 75% of limit (88% failed before)
-            print(f"  Image is {actual_bytes/1e6:.1f} MB, limit is {max_bytes/1e6:.1f} MB → need {n_slices} slices")
+            n_slices = math.ceil(actual_bytes / (max_bytes * 0.80))  # target ##% of limit (88% failed before)
+            print(f"  Image is {actual_bytes/1e6:.1f} MB, limit is {max_bytes/1e6:.1f} MB → need {n_slices} slices (from request size)")
         else:
             n_slices = 4  # fallback
     else:
@@ -178,10 +183,43 @@ def download_large_AOI_in_seperate_tiles(sitename:str, satname:str, bands:dict, 
     min_lon, max_lon = min(lons), max(lons)
     min_lat, max_lat = min(lats), max(lats)
 
+    # Strips are axis-aligned rectangles over the *bounding box*. The failed
+    # getDownloadURL used the real AOI polygon, so estimated bytes were for
+    # polygon area; each bbox strip can be ~(bbox_area/poly_area) larger in
+    # exported pixels. Scale strip count so average strip is in line with the
+    # size error (see EE size limit on tiles that were still ~85 MB for n=7).
+    try:
+        bbox_rect = ee.Geometry.Rectangle([min_lon, min_lat, max_lon, max_lat])
+        bbox_area = float(bbox_rect.area(maxError=1).getInfo())
+        poly_area = float(aoi.area(maxError=1).getInfo())
+        if poly_area > 0 and bbox_area >= poly_area:
+            area_factor = bbox_area / poly_area
+            n_slices_adj = max(1, int(math.ceil(n_slices * area_factor)))
+            if n_slices_adj > n_slices:
+                print(f"  Adjusting strips {n_slices} → {n_slices_adj} (bbox / polygon area ≈ {area_factor:.2f}×)")
+            n_slices = n_slices_adj
+    except Exception:
+        pass
+
     # Approximate width and height in metres
     lat_mid = (min_lat + max_lat) / 2
     width_m  = (max_lon - min_lon) * 111_320 * math.cos(math.radians(lat_mid))
     height_m = (max_lat - min_lat) * 111_320
+
+    def _bisect_lonlat_rect(s_min_lon, s_min_lat, s_max_lon, s_max_lat):
+        lat_c = (s_min_lat + s_max_lat) / 2
+        lon_c = (s_min_lon + s_max_lon) / 2
+        w_m = (s_max_lon - s_min_lon) * 111_320 * math.cos(math.radians(lat_c))
+        h_m = (s_max_lat - s_min_lat) * 111_320
+        if w_m >= h_m:
+            return (
+                (s_min_lon, s_min_lat, lon_c, s_max_lat),
+                (lon_c, s_min_lat, s_max_lon, s_max_lat),
+            )
+        return (
+            (s_min_lon, s_min_lat, s_max_lon, lat_c),
+            (s_min_lon, lat_c, s_max_lon, s_max_lat),
+        )
 
     # --- Slice orthogonal to the longest side --------------------------------
     if width_m >= height_m:
@@ -201,25 +239,47 @@ def download_large_AOI_in_seperate_tiles(sitename:str, satname:str, bands:dict, 
             for i in range(n_slices)
         ]
 
-    # --- Download each slice as a normal image --------------------------------
+    # --- Download each slice (polygon-clipped); bisect further if still over limit
+    tile_counter = [0]
+    max_bisect_depth = 18
+    min_span_deg = 1e-7
 
-    for i, (s_min_lon, s_min_lat, s_max_lon, s_max_lat) in enumerate(slices):
-        tile_region = ee.Geometry.Rectangle([s_min_lon, s_min_lat, s_max_lon, s_max_lat])
-        image_id_tile = f'{tiffutils.get_timestamp(image_id, convert_format=True)}_tile_{i}'
-
-        # try: # we could try again if that becomes and issue
-        url = image.getDownloadURL({
-            'scale': scale,
-            'region': tile_region.getInfo(),
-            'bands': bands,
-        })
+    def download_rect_strip(rect, depth=0):
+        s_min_lon, s_min_lat, s_max_lon, s_max_lat = rect
+        if (s_max_lon - s_min_lon) < min_span_deg and (s_max_lat - s_min_lat) < min_span_deg:
+            raise RuntimeError(
+                f'GEE download tile still too large after splitting; smallest rect {rect}. '
+                'Try fewer bands, coarser scale, or a smaller AOI.'
+            )
+        tile_rect = ee.Geometry.Rectangle([s_min_lon, s_min_lat, s_max_lon, s_max_lat])
+        tile_region = tile_rect.intersection(aoi, ee.ErrorMargin(1))
+        if tile_region.isEmpty().getInfo():
+            return
+        try:
+            url = image.getDownloadURL({
+                'scale': scale,
+                'region': tile_region.getInfo(),
+                'bands': bands,
+            })
+        except Exception as e:
+            if _is_gee_download_size_error(e) and depth < max_bisect_depth:
+                r1, r2 = _bisect_lonlat_rect(s_min_lon, s_min_lat, s_max_lon, s_max_lat)
+                download_rect_strip(r1, depth + 1)
+                download_rect_strip(r2, depth + 1)
+                return
+            raise
+        i = tile_counter[0]
+        tile_counter[0] = i + 1
         download_single_image(
             sitename=sitename,
             satname=satname,
             download_url=url,
             image_id=image_id,
-            tile_number=i
+            tile_number=i,
         )
+
+    for rect in slices:
+        download_rect_strip(rect, 0)
        
 
     # --- Mosaic combined tile tifs into one final image ----------------------
