@@ -592,9 +592,14 @@ def resample_in_memory(input_dataset:gdal.Dataset, target_dataset:gdal.Dataset, 
 
         # ratio-based pansharpening
         # pan_array[np.isneginf(pan_array)] = 0 # NOTE instead (in line bellow) just ignoring these sections of the image (which are usually unusable data)
-        pan_mean = np.mean(pan_array[~np.isneginf(pan_array)]) # sometimes there are iinf values if there are sections of images missing and this throws off the mean
-        pan_ratio = (pan_array + 1e-6) / (pan_mean + 1e-6) # 1e-6 to avoid devide by 0
-        pansharpened_array = resampled_array * pan_ratio
+        pan_valid = pan_array[(~np.isneginf(pan_array)) & np.isfinite(pan_array)]
+        if pan_valid.size == 0:
+            # No finite PAN (e.g. empty / corrupt warp); skip ratio to avoid np.mean on empty slice.
+            pansharpened_array = resampled_array.copy()
+        else:
+            pan_mean = float(np.mean(pan_valid))
+            pan_ratio = (pan_array + 1e-6) / (pan_mean + 1e-6)  # 1e-6 to avoid divide by 0
+            pansharpened_array = resampled_array * pan_ratio
 
         # write pan-sharpened array to dataset
         driver = gdal.GetDriverByName('MEM')
