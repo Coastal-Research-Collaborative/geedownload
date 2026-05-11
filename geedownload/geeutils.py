@@ -162,7 +162,9 @@ def download_large_AOI_in_seperate_tiles(sitename:str, satname:str, bands:dict, 
         actual_bytes, max_bytes = parse_request_size_from_error(size_error_str)
         if actual_bytes and max_bytes:
             # e.g. 290MB / 50MB = 5.8 → need 6 slices to guarantee each is under limit
-            n_slices = math.ceil(actual_bytes / max_bytes)
+            # n_slices = math.ceil(actual_bytes / max_bytes) # this assumes not overhead
+            # n_slices = math.ceil(actual_bytes / max_bytes) + 1  # +1 buffer for metadata etc
+            n_slices = math.ceil(actual_bytes / (max_bytes * 0.75))  # target 75% of limit (88% failed before)
             print(f"  Image is {actual_bytes/1e6:.1f} MB, limit is {max_bytes/1e6:.1f} MB → need {n_slices} slices")
         else:
             n_slices = 4  # fallback
@@ -205,7 +207,7 @@ def download_large_AOI_in_seperate_tiles(sitename:str, satname:str, bands:dict, 
         tile_region = ee.Geometry.Rectangle([s_min_lon, s_min_lat, s_max_lon, s_max_lat])
         image_id_tile = f'{tiffutils.get_timestamp(image_id, convert_format=True)}_tile_{i}'
 
-        # try:
+        # try: # we could try again if that becomes and issue
         url = image.getDownloadURL({
             'scale': scale,
             'region': tile_region.getInfo(),
