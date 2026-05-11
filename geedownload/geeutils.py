@@ -153,6 +153,22 @@ def parse_request_size_from_error(error_str: str):
     return None, None
 
 
+def _bisect_lonlat_rect(s_min_lon, s_min_lat, s_max_lon, s_max_lat):
+    lat_c = (s_min_lat + s_max_lat) / 2
+    lon_c = (s_min_lon + s_max_lon) / 2
+    w_m = (s_max_lon - s_min_lon) * 111_320 * math.cos(math.radians(lat_c))
+    h_m = (s_max_lat - s_min_lat) * 111_320
+    if w_m >= h_m:
+        return (
+            (s_min_lon, s_min_lat, lon_c, s_max_lat),
+            (lon_c, s_min_lat, s_max_lon, s_max_lat),
+        )
+    return (
+        (s_min_lon, s_min_lat, s_max_lon, lat_c),
+        (s_min_lon, lat_c, s_max_lon, s_max_lat),
+    )
+
+
 def download_large_AOI_in_seperate_tiles(sitename:str, satname:str, bands:dict, aoi, image, image_id, size_error_str:str):
 
     if satname == 'S2':
@@ -206,21 +222,6 @@ def download_large_AOI_in_seperate_tiles(sitename:str, satname:str, bands:dict, 
     width_m  = (max_lon - min_lon) * 111_320 * math.cos(math.radians(lat_mid))
     height_m = (max_lat - min_lat) * 111_320
 
-    def _bisect_lonlat_rect(s_min_lon, s_min_lat, s_max_lon, s_max_lat):
-        lat_c = (s_min_lat + s_max_lat) / 2
-        lon_c = (s_min_lon + s_max_lon) / 2
-        w_m = (s_max_lon - s_min_lon) * 111_320 * math.cos(math.radians(lat_c))
-        h_m = (s_max_lat - s_min_lat) * 111_320
-        if w_m >= h_m:
-            return (
-                (s_min_lon, s_min_lat, lon_c, s_max_lat),
-                (lon_c, s_min_lat, s_max_lon, s_max_lat),
-            )
-        return (
-            (s_min_lon, s_min_lat, s_max_lon, lat_c),
-            (s_min_lon, lat_c, s_max_lon, s_max_lat),
-        )
-
     # --- Slice orthogonal to the longest side --------------------------------
     if width_m >= height_m:
         # Cut vertically (slice along longitude)
@@ -253,7 +254,11 @@ def download_large_AOI_in_seperate_tiles(sitename:str, satname:str, bands:dict, 
             )
         tile_rect = ee.Geometry.Rectangle([s_min_lon, s_min_lat, s_max_lon, s_max_lat])
         tile_region = tile_rect.intersection(aoi, ee.ErrorMargin(1))
-        if tile_region.isEmpty().getInfo():
+        # Python ee.Geometry has no isEmpty(); use geodesic area (m²) from server.
+        try:
+            if float(tile_region.area(maxError=1).getInfo()) < 1.0:
+                return
+        except Exception:
             return
         try:
             url = image.getDownloadURL({
