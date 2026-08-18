@@ -338,15 +338,31 @@ def download_large_AOI_in_seperate_tiles(sitename:str, satname:str, bands:dict, 
     return final_path
 
 
+def _print_download_failure(satname, image_id, message):
+    """Print a failed-scene message so long batch runs can skip and keep going."""
+    label = image_id if image_id else 'unknown image'
+    print(f"Failed to download {satname} {label}: {message}")
+    print(f"  Skipping this scene and continuing with the next download.")
+
+
 def download_single_image(sitename:str, satname:str, download_url, image_id=None, combine_tiff_files:bool=True, alternate_save_path=None, tile_number:int=None):
+    imagery_downloaded = False
     try:
         response = requests.get(download_url)
     except Exception as e:
-        print('what is going on? requests.get exception')
-        print(e)
+        _print_download_failure(satname, image_id, f'requests.get exception ({type(e).__name__}): {e}')
+        return False
 
     # Check if the request was successful (status code 200)
-    if response.status_code == 200:
+    if response.status_code != 200:
+        body_preview = (response.text or '').strip().replace('\n', ' ')[:500]
+        detail = f"HTTP {response.status_code} {response.reason}"
+        if body_preview:
+            detail = f"{detail}. Response: {body_preview}"
+        _print_download_failure(satname, image_id, detail)
+        return False
+
+    try:
         # create download folder
         if alternate_save_path is None:
             download_folder_satname = os.path.join('data', 'sat_images', sitename, satname) # sitename dir was already mad
@@ -417,15 +433,15 @@ def download_single_image(sitename:str, satname:str, download_url, image_id=None
             if not pan_fn in this_image_component_fns:
                 this_image_component_fns.append(pan_fn)
         if len(this_image_component_fns)==0:
-            print(f'Could not download {image_id} no image componnent fns')
-            return False # not sure what is going on
+            _print_download_failure(satname, image_id, 'no image component files after unzip')
+            return False
         if combine_tiff_files == True:
             # print(this_image_component_fns)
             tiffutils.combine_tiffs(tiff_files=this_image_component_fns) # for each image combine band tiffs into one tiff file
+    except Exception as e:
+        _print_download_failure(satname, image_id, f'{type(e).__name__}: {e}')
+        return False
 
-    else:
-        print(f"Failed to download file. Status code: {response.status_code}")
-    
     return imagery_downloaded
     
 
@@ -612,15 +628,19 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                             })
                        
                     except Exception as e:
-                        print('download url image.getDownloadURL issue. it it mentions size, reduce tile size')
+                        print('download url image.getDownloadURL issue. if it mentions size, reduce tile size')
                         print(e)
-                        if 'Total request size (' in str(e) and '50331648' in str(e):
+                        if _is_gee_download_size_error(e):
                             # this means the AOI is too big so it needs to be broken up into multiple AOIs
                             print('downloading scene in seperate tiles and then combining them to original AOI with download_large_AOI_in_seperate_tiles()')
-                            download_large_AOI_in_seperate_tiles(sitename=sitename, satname=satname, bands=bands, aoi=aoi, image=image, image_id=image_id, size_error_str=str(e))
+                            try:
+                                download_large_AOI_in_seperate_tiles(sitename=sitename, satname=satname, bands=bands, aoi=aoi, image=image, image_id=image_id, size_error_str=str(e))
+                                imagery_downloaded = True
+                            except Exception as tile_e:
+                                _print_download_failure(satname, image_id, f'tiled download failed ({type(tile_e).__name__}): {tile_e}')
                             continue
-                        else:
-                            raise()
+                        _print_download_failure(satname, image_id, f'getDownloadURL failed ({type(e).__name__}): {e}')
+                        continue
 
                     # print(f'Downloading these bands {bands}')
                     # print(f"Download URL: {download_url}")
@@ -628,19 +648,25 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                     # if 'S' in satname:
                     #     # NOTE udm band needs to be removed from bands each itteration because it is added above resampled as udm_resampled
                     #     bands.remove(udm_band)
-                    if not pan_url is None:
-                        # for landsat 7, 8, 9 we use panchromatic ban for panchromatic sharpening
-                        download_single_image(sitename=sitename,
-                                         satname=satname,
-                                         download_url=pan_url,
-                                         image_id=image_id,
-                                         alternate_save_path=specific_download_path,
-                                         combine_tiff_files=False) # false cuz this is Just downloading one image
-                    download_single_image(sitename=sitename,
-                                         satname=satname,
-                                         download_url=download_url,
-                                         alternate_save_path=specific_download_path,
-                                         image_id=image_id)
+                    try:
+                        if not pan_url is None:
+                            # for landsat 7, 8, 9 we use panchromatic ban for panchromatic sharpening
+                            if download_single_image(sitename=sitename,
+                                             satname=satname,
+                                             download_url=pan_url,
+                                             image_id=image_id,
+                                             alternate_save_path=specific_download_path,
+                                             combine_tiff_files=False): # false cuz this is Just downloading one image
+                                imagery_downloaded = True
+                        if download_single_image(sitename=sitename,
+                                             satname=satname,
+                                             download_url=download_url,
+                                             alternate_save_path=specific_download_path,
+                                             image_id=image_id):
+                            imagery_downloaded = True
+                    except Exception as e:
+                        _print_download_failure(satname, image_id, f'{type(e).__name__}: {e}')
+                        continue
             else:
                 print(f"No images found for {satname} in the given date range and polygon.")
     # NOTE this function is not really needed anymore and It can make a mess
