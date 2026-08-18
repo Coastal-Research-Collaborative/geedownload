@@ -17,6 +17,7 @@ import re
 import tempfile
 from pathlib import Path
 import math
+import time
 import rasterio
 from rasterio.merge import merge
 from rasterio.transform import from_bounds
@@ -136,9 +137,117 @@ def channel_name_to_band(channel_name, satname, reverse=False):
         
 
 #### handling too large AOI requests ####
+class GeeRetryableDownloadError(Exception):
+    """GEE 503 / memory exceeded after retries. Caller should split the AOI into tiles."""
+    pass
+
+
 def _is_gee_download_size_error(exc: BaseException) -> bool:
     s = str(exc)
     return 'Total request size (' in s and '50331648' in s
+
+
+def _is_gee_retryable_error_text(text: str) -> bool:
+    t = (text or '').lower()
+    if 'memory capacity exceeded' in t:
+        return True
+    if 'rate limit' in t or 'too many requests' in t:
+        return True
+    if 'service unavailable' in t:
+        return True
+    if '"status": "unavailable"' in t or '"status":"unavailable"' in t:
+        return True
+    return False
+
+
+def _http_status_should_retry(status_code: int) -> bool:
+    return status_code in (429, 500, 502, 503, 504)
+
+
+def _http_should_split_tiles(response) -> bool:
+    """True when smaller tiles are likely to succeed after retries failed."""
+    if response is None:
+        return False
+    body = (response.text or '').lower()
+    if 'memory capacity exceeded' in body:
+        return True
+    # 503 UNAVAILABLE on a full-AOI zip is often the same capacity problem
+    if response.status_code == 503:
+        return True
+    return False
+
+
+def _retry_gee_call(fn, description='GEE request', max_attempts=4, initial_wait_sec=15):
+    """Retry GEE client calls that fail with 503 / memory / unavailable. Size-limit errors are not retried."""
+    wait = initial_wait_sec
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return fn()
+        except Exception as e:
+            if _is_gee_download_size_error(e):
+                raise
+            can_retry = _is_gee_retryable_error_text(str(e)) and attempt < max_attempts
+            if not can_retry:
+                raise
+            print(f'  {description} failed ({e}); retry {attempt}/{max_attempts} in {wait}s')
+            time.sleep(wait)
+            wait = min(wait * 2, 120)
+
+
+def _requests_get_with_retries(url, satname, image_id, max_attempts=4, initial_wait_sec=15):
+    """GET a GEE download URL, retrying 429/5xx (including memory capacity exceeded)."""
+    wait = initial_wait_sec
+    response = None
+    label = image_id if image_id else 'unknown image'
+    for attempt in range(1, max_attempts + 1):
+        try:
+            response = requests.get(url)
+        except Exception as e:
+            if attempt >= max_attempts:
+                _print_download_failure(satname, image_id, f'requests.get exception ({type(e).__name__}): {e}')
+                return None
+            print(f'  {satname} {label} request error ({type(e).__name__}: {e}); retry {attempt}/{max_attempts} in {wait}s')
+            time.sleep(wait)
+            wait = min(wait * 2, 120)
+            continue
+        if response.status_code == 200:
+            return response
+        if _http_status_should_retry(response.status_code) and attempt < max_attempts:
+            body_preview = (response.text or '').strip().replace('\n', ' ')[:160]
+            print(f'  {satname} {label} HTTP {response.status_code} ({body_preview}); retry {attempt}/{max_attempts} in {wait}s')
+            time.sleep(wait)
+            wait = min(wait * 2, 120)
+            continue
+        return response
+    return response
+
+
+def _image_save_dir(sitename, satname, data_dir=None, alternate_save_path=None):
+    if alternate_save_path is not None:
+        return alternate_save_path
+    root = data_dir if data_dir is not None else 'data'
+    return os.path.join(root, 'sat_images', sitename, satname)
+
+
+def _export_scale(satname, desired_scale=None):
+    if desired_scale is not None:
+        return desired_scale
+    if satname == 'S2':
+        return 10
+    return 30
+
+
+def _pan_and_other_bands(satname, bands, desired_scale=None):
+    """Split PAN from other GEE band ids. PAN is only a separate 15 m export for native L7/L8/L9."""
+    if desired_scale is not None or satname not in ('L7', 'L8', 'L9'):
+        return None, list(bands)
+    pan_band = channel_name_to_band('PAN', satname)
+    if pan_band not in bands:
+        return None, list(bands)
+    return pan_band, [b for b in bands if b != pan_band]
+
+
+_BAND_FILE_SUFFIXES = ['R', 'G', 'B', 'NIR', 'SWIR1', 'SWIR2', 'TIR', 'PAN', 'UDM']
 
 
 def parse_request_size_from_error(error_str: str):
@@ -169,14 +278,51 @@ def _bisect_lonlat_rect(s_min_lon, s_min_lat, s_max_lon, s_max_lat):
     )
 
 
-def download_large_AOI_in_seperate_tiles(sitename:str, satname:str, bands:dict, aoi, image, image_id, size_error_str:str):
+def _mosaic_raster_files(paths, final_path):
+    datasets = [rasterio.open(p) for p in paths]
+    mosaic, transform = merge(datasets)
+    meta = datasets[0].meta.copy()
+    descriptions = datasets[0].descriptions
+    for ds in datasets:
+        ds.close()
+    meta.update({
+        'driver': 'GTiff',
+        'height': mosaic.shape[1],
+        'width': mosaic.shape[2],
+        'transform': transform,
+        'compress': 'lzw',
+    })
+    with rasterio.open(final_path, 'w', **meta) as dest:
+        dest.write(mosaic)
+        for i, desc in enumerate(descriptions, start=1):
+            if desc:
+                dest.update_tags(i, name=desc)
+    for p in paths:
+        try:
+            os.remove(p)
+        except PermissionError:
+            print(f"  Could not delete {os.path.basename(p)}")
+    return final_path
 
-    if satname == 'S2':
-        scale = 10
-    elif satname in ('L5', 'L7', 'L8', 'L9'):
-        scale = 30
-    else:
-        scale = 30
+
+def _combine_scene_band_files(sat_dir, satname, image_id):
+    """Combine leftover single-band tifs (including 15 m PAN) for one scene."""
+    timestamp_str = tiffutils.get_timestamp(image_id, convert_format=True)
+    fns = glob(os.path.join(sat_dir, f'{satname}_{timestamp_str}.*.tif'))
+    rgb = [f for f in fns if f.endswith(('.R.tif', '.G.tif', '.B.tif'))]
+    if not rgb:
+        return False
+    resample = satname in ('L7', 'L8', 'L9')
+    tiffutils.combine_tiffs(fns, satname=satname, resample=resample)
+    return True
+
+
+def download_large_AOI_in_seperate_tiles(sitename:str, satname:str, bands, aoi, image, image_id, size_error_str:str='', scale:int=None, combine_tiff_files:bool=True, data_dir=None, alternate_save_path=None):
+
+    if scale is None:
+        scale = _export_scale(satname)
+
+    save_dir = _image_save_dir(sitename, satname, data_dir=data_dir, alternate_save_path=alternate_save_path)
 
     # --- Calculate how many slices we need -----------------------------------
     if size_error_str:
@@ -186,11 +332,15 @@ def download_large_AOI_in_seperate_tiles(sitename:str, satname:str, bands:dict, 
             # n_slices = math.ceil(actual_bytes / max_bytes) # this assumes not overhead
             # n_slices = math.ceil(actual_bytes / max_bytes) + 1  # +1 buffer for metadata etc
             n_slices = math.ceil(actual_bytes / (max_bytes * 0.80))  # target ##% of limit (88% failed before)
-            print(f"  Image is {actual_bytes/1e6:.1f} MB, limit is {max_bytes/1e6:.1f} MB → need {n_slices} slices (from request size)")
+            print(f"  Image is {actual_bytes/1e6:.1f} MB, limit is {max_bytes/1e6:.1f} MB → need {n_slices} slices (from request size) at {scale} m")
+        elif _is_gee_retryable_error_text(size_error_str):
+            # 15 m PAN has 4× the pixels of 30 m over the same AOI
+            n_slices = 16 if scale <= 15 else 8
+            print(f"  GEE memory/unavailable on full AOI at {scale} m → starting with {n_slices} slices")
         else:
             n_slices = 4  # fallback
     else:
-        n_slices = 4
+        n_slices = 16 if scale <= 15 else 8
 
     # --- Get AOI bounds -------------------------------------------------------
     coords = aoi.bounds().getInfo()['coordinates'][0]
@@ -261,13 +411,17 @@ def download_large_AOI_in_seperate_tiles(sitename:str, satname:str, bands:dict, 
         except Exception:
             return
         try:
-            url = image.getDownloadURL({
-                'scale': scale,
-                'region': tile_region.getInfo(),
-                'bands': bands,
-            })
+            url = _retry_gee_call(
+                lambda: image.getDownloadURL({
+                    'scale': scale,
+                    'region': tile_region.getInfo(),
+                    'bands': bands,
+                }),
+                description=f'tile getDownloadURL {satname} {image_id} {scale}m',
+            )
         except Exception as e:
-            if _is_gee_download_size_error(e) and depth < max_bisect_depth:
+            if (_is_gee_download_size_error(e) or _is_gee_retryable_error_text(str(e))) and depth < max_bisect_depth:
+                print(f'  Tile still too large/memory-limited at {scale} m; splitting further (depth {depth + 1})')
                 r1, r2 = _bisect_lonlat_rect(s_min_lon, s_min_lat, s_max_lon, s_max_lat)
                 download_rect_strip(r1, depth + 1)
                 download_rect_strip(r2, depth + 1)
@@ -275,67 +429,56 @@ def download_large_AOI_in_seperate_tiles(sitename:str, satname:str, bands:dict, 
             raise
         i = tile_counter[0]
         tile_counter[0] = i + 1
-        download_single_image(
-            sitename=sitename,
-            satname=satname,
-            download_url=url,
-            image_id=image_id,
-            tile_number=i,
-        )
+        try:
+            ok = download_single_image(
+                sitename=sitename,
+                satname=satname,
+                download_url=url,
+                image_id=image_id,
+                tile_number=i,
+                combine_tiff_files=combine_tiff_files,
+                alternate_save_path=save_dir,
+                data_dir=data_dir,
+            )
+        except GeeRetryableDownloadError:
+            if depth < max_bisect_depth:
+                print(f'  Tile download hit GEE memory/503 at {scale} m; splitting further (depth {depth + 1})')
+                r1, r2 = _bisect_lonlat_rect(s_min_lon, s_min_lat, s_max_lon, s_max_lat)
+                download_rect_strip(r1, depth + 1)
+                download_rect_strip(r2, depth + 1)
+                return
+            raise
+        if not ok:
+            raise RuntimeError(f'Tile download failed for {image_id} tile {i} at {scale} m')
 
     for rect in slices:
         download_rect_strip(rect, 0)
        
 
-    # --- Mosaic combined tile tifs into one final image ----------------------
-    sat_dir = os.path.join('data', 'sat_images', sitename, satname)
+    # --- Mosaic tile tifs into one final image (or one file per band) ---------
     timestamp_str = tiffutils.get_timestamp(image_id, convert_format=True)
-    
-    combined_tile_paths = sorted(glob(os.path.join(sat_dir, f'{satname}_*{timestamp_str}*_tile_*.tif')))
-    combined_tile_paths = [p for p in combined_tile_paths if not any(
-        p.endswith(f'.{band}.tif') for band in ['R', 'G', 'B', 'NIR', 'SWIR1', 'SWIR2', 'TIR', 'PAN', 'UDM']
-    )]
+    tile_glob = os.path.join(save_dir, f'{satname}_*{timestamp_str}*_tile_*.tif')
 
-    if not combined_tile_paths:
-        raise RuntimeError(f"No combined tile tifs found for {timestamp_str}")
+    if combine_tiff_files:
+        combined_tile_paths = sorted(glob(tile_glob))
+        combined_tile_paths = [p for p in combined_tile_paths if not any(
+            p.endswith(f'.{band}.tif') for band in _BAND_FILE_SUFFIXES
+        )]
+        if not combined_tile_paths:
+            raise RuntimeError(f"No combined tile tifs found for {timestamp_str} at {scale} m")
+        final_path = os.path.join(save_dir, f'{satname}_{timestamp_str}.tif')
+        return _mosaic_raster_files(combined_tile_paths, final_path)
 
-    # print(f"  Mosaicking {len(combined_tile_paths)} tiles: {[os.path.basename(p) for p in combined_tile_paths]}")
-
-    final_path = os.path.join(sat_dir, f'{satname}_{timestamp_str}.tif')
-
-    datasets = [rasterio.open(p) for p in combined_tile_paths]
-    mosaic, transform = merge(datasets)
-
-    # Copy meta + band descriptions from first tile
-    meta = datasets[0].meta.copy()
-    descriptions = datasets[0].descriptions  # tuple of band names e.g. ('R', 'G', 'B', ...)
-    for ds in datasets:
-        ds.close()
-
-    meta.update({
-        'driver': 'GTiff',
-        'height': mosaic.shape[1],
-        'width': mosaic.shape[2],
-        'transform': transform,
-        'compress': 'lzw',
-    })
-
-    with rasterio.open(final_path, 'w', **meta) as dest:
-        dest.write(mosaic)
-        # Restore band descriptions so downstream code still sees R, G, B etc.
-        for i, desc in enumerate(descriptions, start=1):
-            dest.update_tags(i, name=desc)
-
-    # print(f"  ✓ Mosaic saved → {final_path}")
-
-    # Clean up tile tifs
-    for p in combined_tile_paths:
-        try:
-            os.remove(p)
-        except PermissionError:
-            print(f"  Could not delete {os.path.basename(p)}")
-
-    return final_path
+    written = []
+    for band in _BAND_FILE_SUFFIXES:
+        band_tiles = sorted(glob(os.path.join(save_dir, f'{satname}_*{timestamp_str}*_tile_*.{band}.tif')))
+        if not band_tiles:
+            continue
+        final_path = os.path.join(save_dir, f'{satname}_{timestamp_str}.{band}.tif')
+        written.append(_mosaic_raster_files(band_tiles, final_path))
+    if not written:
+        raise RuntimeError(f"No single-band tile tifs found for {timestamp_str} at {scale} m")
+    return written
 
 
 def _print_download_failure(satname, image_id, message):
@@ -345,12 +488,10 @@ def _print_download_failure(satname, image_id, message):
     print(f"  Skipping this scene and continuing with the next download.")
 
 
-def download_single_image(sitename:str, satname:str, download_url, image_id=None, combine_tiff_files:bool=True, alternate_save_path=None, tile_number:int=None):
+def download_single_image(sitename:str, satname:str, download_url, image_id=None, combine_tiff_files:bool=True, alternate_save_path=None, tile_number:int=None, data_dir=None):
     imagery_downloaded = False
-    try:
-        response = requests.get(download_url)
-    except Exception as e:
-        _print_download_failure(satname, image_id, f'requests.get exception ({type(e).__name__}): {e}')
+    response = _requests_get_with_retries(download_url, satname, image_id)
+    if response is None:
         return False
 
     # Check if the request was successful (status code 200)
@@ -359,15 +500,14 @@ def download_single_image(sitename:str, satname:str, download_url, image_id=None
         detail = f"HTTP {response.status_code} {response.reason}"
         if body_preview:
             detail = f"{detail}. Response: {body_preview}"
+        if _http_should_split_tiles(response):
+            raise GeeRetryableDownloadError(detail)
         _print_download_failure(satname, image_id, detail)
         return False
 
     try:
         # create download folder
-        if alternate_save_path is None:
-            download_folder_satname = os.path.join('data', 'sat_images', sitename, satname) # sitename dir was already mad
-        else:
-            download_folder_satname = alternate_save_path
+        download_folder_satname = _image_save_dir(sitename, satname, data_dir=data_dir, alternate_save_path=alternate_save_path)
         os.makedirs(download_folder_satname, exist_ok=True) # make sure the download folder exists before saving the file
 
         # change zip filename to include the satname at the beginning and avoid nested folders
@@ -438,12 +578,79 @@ def download_single_image(sitename:str, satname:str, download_url, image_id=None
         if combine_tiff_files == True:
             # print(this_image_component_fns)
             tiffutils.combine_tiffs(tiff_files=this_image_component_fns) # for each image combine band tiffs into one tiff file
+    except GeeRetryableDownloadError:
+        raise
     except Exception as e:
         _print_download_failure(satname, image_id, f'{type(e).__name__}: {e}')
         return False
 
     return imagery_downloaded
     
+
+def _try_tiled_export(sitename, satname, bands, aoi, image, image_id, size_error_str, scale, data_dir=None, alternate_save_path=None):
+    print(f'downloading scene in seperate tiles ({scale} m, {len(bands)} band(s)) with download_large_AOI_in_seperate_tiles()')
+    try:
+        download_large_AOI_in_seperate_tiles(
+            sitename=sitename,
+            satname=satname,
+            bands=bands,
+            aoi=aoi,
+            image=image,
+            image_id=image_id,
+            size_error_str=size_error_str or '',
+            scale=scale,
+            combine_tiff_files=False,
+            data_dir=data_dir,
+            alternate_save_path=alternate_save_path,
+        )
+        return True
+    except Exception as tile_e:
+        _print_download_failure(satname, image_id, f'tiled {scale}m download failed ({type(tile_e).__name__}): {tile_e}')
+        return False
+
+
+def _download_or_tile_export(sitename, satname, image, image_id, aoi, bands, scale, combine_tiff_files=True, data_dir=None, alternate_save_path=None):
+    """Full-AOI download for one export; tile only this export (at this scale) on size/503 errors."""
+    if not bands:
+        return True
+    try:
+        url = _retry_gee_call(
+            lambda: image.getDownloadURL({
+                'scale': scale,
+                'region': aoi.getInfo(),
+                'bands': bands,
+            }),
+            description=f'getDownloadURL {satname} {image_id} {scale}m',
+        )
+    except Exception as e:
+        print('download url image.getDownloadURL issue. if it mentions size, reduce tile size')
+        print(e)
+        if _is_gee_download_size_error(e) or _is_gee_retryable_error_text(str(e)):
+            return _try_tiled_export(
+                sitename, satname, bands, aoi, image, image_id, str(e),
+                scale=scale, data_dir=data_dir, alternate_save_path=alternate_save_path,
+            )
+        _print_download_failure(satname, image_id, f'getDownloadURL {scale}m failed ({type(e).__name__}): {e}')
+        return False
+
+    try:
+        return bool(download_single_image(
+            sitename=sitename,
+            satname=satname,
+            download_url=url,
+            image_id=image_id,
+            alternate_save_path=alternate_save_path,
+            data_dir=data_dir,
+            combine_tiff_files=combine_tiff_files,
+        ))
+    except GeeRetryableDownloadError as e:
+        print(f'  {satname} {image_id} {scale}m GEE memory/unavailable after retries')
+        print(f'  Retrying this export as smaller tiles at {scale} m')
+        return _try_tiled_export(
+            sitename, satname, bands, aoi, image, image_id, str(e),
+            scale=scale, data_dir=data_dir, alternate_save_path=alternate_save_path,
+        )
+
 
 def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, specific_download_path=None, polygon=None, desired_scale:int=None, satnames:list=['L4', 'L5', 'L7', 'L8', 'L9', 'S2'], proccess_downloads:bool=True, specific_band_requests:dict=None, max_cloud_percent:int=20):
     """
@@ -580,90 +787,41 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                     #     image = image.addBands(udm_resampled) # Add the resampled UDM band back to the image
                     #     bands.append(udm_band) # Add the UDM band back to the list of bands to export
 
-                    # Prepare download URL
+                    # PAN at 15 m first (L7/L8/L9), then other bands at native scale.
+                    # Each export is tiled independently so a 15 m PAN 503 does not
+                    # re-download everything at 30 m.
                     try:
-                        pan_url = None # already set to none
-                        if not desired_scale is None:
-                            # then all the bands at the desired scale
-                            download_url = image.getDownloadURL({
-                            'scale': desired_scale,
-                            'region': aoi.getInfo(),
-                            'bands': bands
-                            })
-                        elif 'L' in satname and desired_scale is None: # already checked if desired scale is None
-                            # Panchromatic band exists only on L7, L8, L9 — never call channel_name_to_band('PAN', …) for L5.
-                            if satname in ('L7', 'L8', 'L9'):
-                                pan_band = channel_name_to_band('PAN', satname)
-                                non_pan_bands = [b for b in bands if b != pan_band]
-                                if pan_band in bands:
-                                    pan_url = image.getDownloadURL({
-                                        'scale': 15,
-                                        'region': aoi.getInfo(),
-                                        'bands': [pan_band]
-                                    })
-                                    download_url = image.getDownloadURL({
-                                        'scale': 30,
-                                        'region': aoi.getInfo(),
-                                        'bands': non_pan_bands
-                                    })
-                                else:
-                                    download_url = image.getDownloadURL({
-                                        'scale': 30,
-                                        'region': aoi.getInfo(),
-                                        'bands': bands
-                                    })
-                            else:
-                                # L5 (and any Landsat without PAN): single export at 30 m multispectral resolution
-                                download_url = image.getDownloadURL({
-                                    'scale': 30,
-                                    'region': aoi.getInfo(),
-                                    'bands': bands
-                                })
-                        else:
-                            # NOTE sentinel imagery with no desired scale (native ~10 m)
-                            download_url = image.getDownloadURL({
-                            'scale': 10,
-                            'region': aoi.getInfo(),
-                            'bands': bands
-                            })
-                       
-                    except Exception as e:
-                        print('download url image.getDownloadURL issue. if it mentions size, reduce tile size')
-                        print(e)
-                        if _is_gee_download_size_error(e):
-                            # this means the AOI is too big so it needs to be broken up into multiple AOIs
-                            print('downloading scene in seperate tiles and then combining them to original AOI with download_large_AOI_in_seperate_tiles()')
-                            try:
-                                download_large_AOI_in_seperate_tiles(sitename=sitename, satname=satname, bands=bands, aoi=aoi, image=image, image_id=image_id, size_error_str=str(e))
+                        pan_band, other_bands = _pan_and_other_bands(satname, bands, desired_scale)
+                        sat_save_dir = _image_save_dir(
+                            sitename, satname, data_dir=data_dir, alternate_save_path=specific_download_path
+                        )
+                        export_kwargs = dict(
+                            sitename=sitename,
+                            satname=satname,
+                            image=image,
+                            image_id=image_id,
+                            aoi=aoi,
+                            data_dir=data_dir,
+                            alternate_save_path=specific_download_path,
+                        )
+                        if pan_band is not None:
+                            if _download_or_tile_export(
+                                bands=[pan_band],
+                                scale=15,
+                                combine_tiff_files=False,
+                                **export_kwargs,
+                            ):
                                 imagery_downloaded = True
-                            except Exception as tile_e:
-                                _print_download_failure(satname, image_id, f'tiled download failed ({type(tile_e).__name__}): {tile_e}')
-                            continue
-                        _print_download_failure(satname, image_id, f'getDownloadURL failed ({type(e).__name__}): {e}')
-                        continue
-
-                    # print(f'Downloading these bands {bands}')
-                    # print(f"Download URL: {download_url}")
-
-                    # if 'S' in satname:
-                    #     # NOTE udm band needs to be removed from bands each itteration because it is added above resampled as udm_resampled
-                    #     bands.remove(udm_band)
-                    try:
-                        if not pan_url is None:
-                            # for landsat 7, 8, 9 we use panchromatic ban for panchromatic sharpening
-                            if download_single_image(sitename=sitename,
-                                             satname=satname,
-                                             download_url=pan_url,
-                                             image_id=image_id,
-                                             alternate_save_path=specific_download_path,
-                                             combine_tiff_files=False): # false cuz this is Just downloading one image
+                        if other_bands:
+                            if _download_or_tile_export(
+                                bands=other_bands,
+                                scale=_export_scale(satname, desired_scale),
+                                combine_tiff_files=True,
+                                **export_kwargs,
+                            ):
                                 imagery_downloaded = True
-                        if download_single_image(sitename=sitename,
-                                             satname=satname,
-                                             download_url=download_url,
-                                             alternate_save_path=specific_download_path,
-                                             image_id=image_id):
-                            imagery_downloaded = True
+                        # If MS was tiled as single-band files, PAN is already on disk as .PAN.tif
+                        _combine_scene_band_files(sat_save_dir, satname, image_id)
                     except Exception as e:
                         _print_download_failure(satname, image_id, f'{type(e).__name__}: {e}')
                         continue
