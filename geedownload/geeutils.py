@@ -229,6 +229,26 @@ def _image_save_dir(sitename, satname, data_dir=None, alternate_save_path=None):
     return os.path.join(root, 'sat_images', sitename, satname)
 
 
+def _combined_scene_path(sitename, satname, image_id, data_dir=None, alternate_save_path=None):
+    """Final per-scene multi-band GeoTIFF path written by download + combine."""
+    sat_dir = _image_save_dir(
+        sitename, satname, data_dir=data_dir, alternate_save_path=alternate_save_path
+    )
+    timestamp_str = tiffutils.get_timestamp(image_id, convert_format=True)
+    return os.path.join(sat_dir, f'{satname}_{timestamp_str}.tif')
+
+
+def _scene_already_on_disk(sitename, satname, image_id, data_dir=None, alternate_save_path=None, min_bytes=10_000):
+    """True if a usable combined scene TIFF already exists (skip GEE re-fetch)."""
+    path = _combined_scene_path(
+        sitename, satname, image_id, data_dir=data_dir, alternate_save_path=alternate_save_path
+    )
+    try:
+        return os.path.isfile(path) and os.path.getsize(path) >= min_bytes
+    except OSError:
+        return False
+
+
 def _export_scale(satname, desired_scale=None):
     if desired_scale is not None:
         return desired_scale
@@ -609,15 +629,33 @@ def _try_tiled_export(sitename, satname, bands, aoi, image, image_id, size_error
         return False
 
 
-def _download_or_tile_export(sitename, satname, image, image_id, aoi, bands, scale, combine_tiff_files=True, data_dir=None, alternate_save_path=None):
-    """Full-AOI download for one export; tile only this export (at this scale) on size/503 errors."""
+def _download_or_tile_export(
+    sitename,
+    satname,
+    image,
+    image_id,
+    aoi,
+    bands,
+    scale,
+    combine_tiff_files=True,
+    data_dir=None,
+    alternate_save_path=None,
+    region=None,
+):
+    """Full-AOI download for one export; tile only this export (at this scale) on size/503 errors.
+
+    ``region`` should be a cached ``aoi.getInfo()`` dict when available so we do not
+    pay an extra GEE round-trip per image (critical for small AOIs / many scenes).
+    """
     if not bands:
         return True
+    if region is None:
+        region = aoi.getInfo()
     try:
         url = _retry_gee_call(
             lambda: image.getDownloadURL({
                 'scale': scale,
-                'region': aoi.getInfo(),
+                'region': region,
                 'bands': bands,
             }),
             description=f'getDownloadURL {satname} {image_id} {scale}m',
@@ -702,6 +740,9 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
         polygon = [[coord[0], coord[1]] for coord in coords]  # Keep only lat, lon
 
     aoi = ee.Geometry.Polygon([polygon])
+    # Cache once — aoi.getInfo() inside the per-scene loop was an extra GEE round-trip
+    # per export (often 2× for Landsat PAN+MS) and dominated small-AOI download time.
+    aoi_region = aoi.getInfo()
 
         
 
@@ -753,39 +794,31 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                           .filterMetadata(cloud_cover_term, 'less_than', max_cloud_percent)
                         )
             
-            # Check if the collection is not empty
+            # One getInfo() for features (avoids size().getInfo() + getInfo() double hit)
             try:
-                n_images = collection.size().getInfo()
-            except ee.ee_exception.EEException as e:
-                n_images = 0 # if n_images = 0 (it will print out that this is because there are no images available)
+                features = collection.getInfo().get('features') or []
+            except ee.ee_exception.EEException:
+                features = []
+            n_images = len(features)
             if n_images > 0:
-                for image in collection.getInfo()['features']:   
+                skipped = 0
+                for image in features:
                     # Get the ID of the image to download. This is each image not each band 
                     image_id = image['id'] # something like this: COPERNICUS/S2_HARMONIZED/20250712T153559_20250712T153728_T19TCG 
                     # print(f"Processing image: {image_id}")
 
+                    if _scene_already_on_disk(
+                        sitename,
+                        satname,
+                        image_id,
+                        data_dir=data_dir,
+                        alternate_save_path=specific_download_path,
+                    ):
+                        skipped += 1
+                        imagery_downloaded = True
+                        continue
+
                     image = ee.Image(image_id)
-                    # print(image.bandNames().getInfo())
-
-
-                    # scale = image.select(channel_name_to_band('R', satname)).projection().nominalScale().getInfo()
-                    # # print(f'scale of red: {scale}')
-                    # # print('----------------------------------------------------------------')
-                    # if not 'S' in satname and not satname == 'L5':
-                    #     scale = image.select(channel_name_to_band('PAN', satname)).projection().nominalScale().getInfo()
-                    #     # print(f'scale of pancromatic: {scale}')
-                    # elif satname == 'L5':
-                    #     NOTE no panchromatic band for L5 so cant upsample resolution
-                    #     print('no panchromatic band for L5 so cant upsample resolution')
-                    # else:
-                    #     # NOTE scale udm band for sentinal imagery cuz its 8.99 m instead of 10 m resolution
-                    #     udm_band = channel_name_to_band('UDM', satname)
-                    #     # Resample the UDM band to match the 10m resolution of the other bands
-                    #     udm_resampled = (image.select(udm_band)
-                    #                         .resample()  # Use 'bilinear' for continuous data, 'nearest' for categorical
-                    #                         .reproject(crs=image.select(bands[0]).projection(), scale=10))
-                    #     image = image.addBands(udm_resampled) # Add the resampled UDM band back to the image
-                    #     bands.append(udm_band) # Add the UDM band back to the list of bands to export
 
                     # PAN at 15 m first (L7/L8/L9), then other bands at native scale.
                     # Each export is tiled independently so a 15 m PAN 503 does not
@@ -801,6 +834,7 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                             image=image,
                             image_id=image_id,
                             aoi=aoi,
+                            region=aoi_region,
                             data_dir=data_dir,
                             alternate_save_path=specific_download_path,
                         )
@@ -825,6 +859,8 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                     except Exception as e:
                         _print_download_failure(satname, image_id, f'{type(e).__name__}: {e}')
                         continue
+                if skipped:
+                    print(f'  {satname}: skipped {skipped}/{n_images} scenes already on disk')
             else:
                 print(f"No images found for {satname} in the given date range and polygon.")
     # NOTE this function is not really needed anymore and It can make a mess
