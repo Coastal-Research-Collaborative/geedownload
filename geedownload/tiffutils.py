@@ -7,13 +7,358 @@ Joel Nicolow, Coastal Research Collaborative, November 2024
 
 
 import os
+import re
+import json
 import shutil
 from glob import glob
 import gc
+from datetime import datetime, timezone
 import rasterio
 import matplotlib.pyplot as plt
 import numpy as np
 from osgeo import gdal
+
+
+# Standardized filename / metadata timestamp: YYYYMMDD_HHMMSS (UTC)
+_TIMESTAMP_RE = re.compile(r'^(\d{8})_(\d{6})$')
+_LEGACY_LANDSAT_STEM_RE = re.compile(r'^(L[45789])_(\d{8})_(\d{6})$')
+
+_LANDSAT_COLLECTION = {
+    'L5': 'LANDSAT/LT05/C02/T1_TOA',
+    'L7': 'LANDSAT/LE07/C02/T1_TOA',
+    'L8': 'LANDSAT/LC08/C02/T1_TOA',
+    'L9': 'LANDSAT/LC09/C02/T1_TOA',
+}
+_LANDSAT_SENSOR_PREFIX = {
+    'L5': 'LT05',
+    'L7': 'LE07',
+    'L8': 'LC08',
+    'L9': 'LC09',
+}
+
+# GeoTIFF / sidecar keys written with each combined scene
+META_ACQUISITION_TIME = 'ACQUISITION_TIME_UTC'       # YYYYMMDD_HHMMSS
+META_ACQUISITION_ISO = 'ACQUISITION_TIME_ISO'         # ISO-8601 UTC
+META_GEE_IMAGE_ID = 'GEE_IMAGE_ID'
+META_SATNAME = 'SATNAME'
+META_WRS_PATH = 'WRS_PATH'
+META_WRS_ROW = 'WRS_ROW'
+META_GEOMETRIC_RMSE_MODEL = 'GEOMETRIC_RMSE_MODEL_M'  # meters
+META_GEOMETRIC_RMSE_MODEL_X = 'GEOMETRIC_RMSE_MODEL_X_M'
+META_GEOMETRIC_RMSE_MODEL_Y = 'GEOMETRIC_RMSE_MODEL_Y_M'
+META_FILENAME_CONVENTION = 'FILENAME_CONVENTION'      # 'utc_time' | 'legacy_path_row'
+
+
+def ms_to_utc_timestamp_str(ms) -> str:
+    """Convert GEE system:time_start (ms since epoch) to YYYYMMDD_HHMMSS UTC."""
+    dt = datetime.fromtimestamp(float(ms) / 1000.0, tz=timezone.utc)
+    return dt.strftime('%Y%m%d_%H%M%S')
+
+
+def ms_to_iso_utc(ms) -> str:
+    dt = datetime.fromtimestamp(float(ms) / 1000.0, tz=timezone.utc)
+    return dt.strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
+def scene_center_time_to_hhmmss(scene_center_time: str) -> str:
+    """Parse Landsat SCENE_CENTER_TIME (e.g. '10:25:47.1234560Z') → HHMMSS."""
+    if not scene_center_time:
+        raise ValueError('empty SCENE_CENTER_TIME')
+    t = scene_center_time.strip().rstrip('Z').split('.')[0]
+    parts = t.split(':')
+    if len(parts) != 3:
+        raise ValueError(f'unrecognized SCENE_CENTER_TIME: {scene_center_time!r}')
+    h, m, s = (int(parts[0]), int(parts[1]), int(float(parts[2])))
+    return f'{h:02d}{m:02d}{s:02d}'
+
+
+def extract_scene_metadata(properties: dict, satname: str, image_id: str) -> dict:
+    """
+    Build download/filename metadata from a GEE feature/image properties dict.
+
+    Prefer system:time_start (real UTC sensing time). Landsat product ids only
+    carry date + WRS path/row — never treat path/row as a clock time.
+    """
+    props = properties or {}
+    meta = {
+        META_SATNAME: satname,
+        META_GEE_IMAGE_ID: image_id,
+        META_FILENAME_CONVENTION: 'utc_time',
+    }
+
+    time_ms = props.get('system:time_start')
+    if time_ms is not None:
+        meta[META_ACQUISITION_TIME] = ms_to_utc_timestamp_str(time_ms)
+        meta[META_ACQUISITION_ISO] = ms_to_iso_utc(time_ms)
+    elif props.get('SCENE_CENTER_TIME') and props.get('DATE_ACQUIRED'):
+        date = str(props['DATE_ACQUIRED']).replace('-', '')
+        hhmmss = scene_center_time_to_hhmmss(props['SCENE_CENTER_TIME'])
+        meta[META_ACQUISITION_TIME] = f'{date}_{hhmmss}'
+        meta[META_ACQUISITION_ISO] = f'{date[0:4]}-{date[4:6]}-{date[6:8]}T{hhmmss[0:2]}:{hhmmss[2:4]}:{hhmmss[4:6]}Z'
+    elif satname == 'S2' or (image_id and 'S2' in image_id):
+        # Fall back to sensing time embedded in the Sentinel product id
+        meta[META_ACQUISITION_TIME] = get_timestamp(image_id, convert_format=True)
+    else:
+        raise ValueError(
+            f'No system:time_start (or SCENE_CENTER_TIME) for {image_id}; '
+            'cannot build a real UTC filename timestamp'
+        )
+
+    # WRS path/row (Landsat) — useful even though it is no longer in the filename
+    wrs_path = props.get('WRS_PATH')
+    wrs_row = props.get('WRS_ROW')
+    if wrs_path is None or wrs_row is None:
+        # Try to parse from product id: LC08_089083_20130327
+        product = image_id.split('/')[-1] if image_id else ''
+        m = re.match(r'^L[A-Z0-9]+_(\d{3})(\d{3})_\d{8}', product)
+        if m:
+            wrs_path, wrs_row = int(m.group(1)), int(m.group(2))
+    if wrs_path is not None:
+        meta[META_WRS_PATH] = str(int(wrs_path))
+    if wrs_row is not None:
+        meta[META_WRS_ROW] = str(int(wrs_row))
+
+    for src_key, dst_key in (
+        ('GEOMETRIC_RMSE_MODEL', META_GEOMETRIC_RMSE_MODEL),
+        ('GEOMETRIC_RMSE_MODEL_X', META_GEOMETRIC_RMSE_MODEL_X),
+        ('GEOMETRIC_RMSE_MODEL_Y', META_GEOMETRIC_RMSE_MODEL_Y),
+    ):
+        if props.get(src_key) is not None:
+            meta[dst_key] = str(props[src_key])
+
+    if props.get('CLOUD_COVER') is not None:
+        meta['CLOUD_COVER'] = str(props['CLOUD_COVER'])
+    if props.get('CLOUDY_PIXEL_PERCENTAGE') is not None:
+        meta['CLOUDY_PIXEL_PERCENTAGE'] = str(props['CLOUDY_PIXEL_PERCENTAGE'])
+
+    return meta
+
+
+def write_geotiff_metadata(tiff_path: str, metadata: dict, write_sidecar_json: bool = True) -> None:
+    """Embed scene metadata in GeoTIFF tags; optionally write a sidecar .json."""
+    if not metadata or not os.path.isfile(tiff_path):
+        return
+    # GDAL string metadata domain
+    ds = gdal.Open(tiff_path, gdal.GA_Update)
+    if ds is not None:
+        for key, value in metadata.items():
+            if value is None:
+                continue
+            ds.SetMetadataItem(str(key), str(value))
+        ds.FlushCache()
+        ds = None
+    else:
+        # rasterio fallback (e.g. if GDAL couldn't open for update)
+        with rasterio.open(tiff_path, 'r+') as src:
+            src.update_tags(**{str(k): str(v) for k, v in metadata.items() if v is not None})
+
+    if write_sidecar_json:
+        sidecar = os.path.splitext(tiff_path)[0] + '.json'
+        with open(sidecar, 'w') as f:
+            json.dump(metadata, f, indent=2, sort_keys=True)
+
+
+def read_scene_metadata(tiff_path: str) -> dict:
+    """
+    Read scene metadata from sidecar JSON (preferred) or GeoTIFF tags.
+    Falls back to parsing YYYYMMDD_HHMMSS from the filename stem.
+    """
+    sidecar = os.path.splitext(tiff_path)[0] + '.json'
+    if os.path.isfile(sidecar):
+        with open(sidecar, 'r') as f:
+            return json.load(f)
+
+    meta = {}
+    ds = gdal.Open(tiff_path)
+    if ds is not None:
+        meta = {k: v for k, v in (ds.GetMetadata() or {}).items()}
+        ds = None
+    if not meta:
+        try:
+            with rasterio.open(tiff_path) as src:
+                meta = dict(src.tags())
+        except Exception:
+            meta = {}
+
+    if META_ACQUISITION_TIME not in meta:
+        stem = os.path.splitext(os.path.basename(tiff_path))[0]
+        parts = stem.split('_')
+        if len(parts) >= 3 and _TIMESTAMP_RE.match(f'{parts[1]}_{parts[2]}'):
+            meta[META_ACQUISITION_TIME] = f'{parts[1]}_{parts[2]}'
+            meta.setdefault(META_SATNAME, parts[0])
+    return meta
+
+
+def landsat_gee_id_from_legacy_filename(fn: str) -> str:
+    """
+    Vestigial helper: map old Landsat filename L8_YYYYMMDD_PPPRRR.tif
+    (date + WRS path/row, not a clock time) → GEE image id.
+    """
+    stem = os.path.splitext(os.path.basename(fn))[0]
+    m = _LEGACY_LANDSAT_STEM_RE.match(stem)
+    if not m:
+        raise ValueError(f'Not a legacy Landsat stem (expected L#_YYYYMMDD_PPPRRR): {stem}')
+    satname, date, path_row = m.group(1), m.group(2), m.group(3)
+    collection = _LANDSAT_COLLECTION[satname]
+    sensor = _LANDSAT_SENSOR_PREFIX[satname]
+    return f'{collection}/{sensor}_{path_row}_{date}'
+
+
+def legacy_landsat_utc_timestamp(fn: str, initialize_ee: bool = True) -> dict:
+    """
+    Look up the real UTC acquisition time for a Landsat file named with the
+    old date_pathrow convention (e.g. L8_20130327_089083.tif).
+
+    Returns extract_scene_metadata(...) including ACQUISITION_TIME_UTC as
+    YYYYMMDD_HHMMSS. Does not rename or modify the file.
+    """
+    import ee
+    if initialize_ee:
+        try:
+            ee.Initialize()
+        except Exception:
+            ee.Authenticate()
+            ee.Initialize()
+
+    image_id = landsat_gee_id_from_legacy_filename(fn)
+    stem = os.path.splitext(os.path.basename(fn))[0]
+    satname = stem.split('_')[0]
+    info = ee.Image(image_id).getInfo()
+    props = (info or {}).get('properties') or {}
+    return extract_scene_metadata(props, satname=satname, image_id=image_id)
+
+
+def is_legacy_landsat_file(tiff_path: str) -> bool:
+    """
+    True if this looks like a Landsat GeoTIFF still using date_pathrow naming
+    and has not already been stamped with utc_time metadata.
+
+    Old convention: L8_20130327_089083.tif where 089083 is WRS path/row, not HHMMSS.
+    """
+    stem = os.path.splitext(os.path.basename(tiff_path))[0]
+    if not _LEGACY_LANDSAT_STEM_RE.match(stem):
+        return False
+    meta = read_scene_metadata(tiff_path)
+    if meta.get(META_FILENAME_CONVENTION) == 'utc_time':
+        return False
+    _, date, suffix = stem.split('_')
+    acq = meta.get(META_ACQUISITION_TIME)
+    # Already has a real acquisition time that differs from the path/row suffix
+    if acq and acq != f'{date}_{suffix}' and _TIMESTAMP_RE.match(acq):
+        return False
+    try:
+        image_id = landsat_gee_id_from_legacy_filename(tiff_path)
+    except ValueError:
+        return False
+    # GEE product id is SENSOR_PPPRRR_YYYYMMDD — if the filename suffix is that
+    # PPPRRR, this is the vestigial path/row naming.
+    product = image_id.split('/')[-1]  # e.g. LC08_089083_20130327
+    return product.endswith(f'_{suffix}_{date}')
+
+
+def migrate_legacy_landsat_file(
+    tiff_path: str,
+    dry_run: bool = False,
+    rename: bool = True,
+    write_sidecar_json: bool = True,
+    initialize_ee: bool = True,
+) -> dict:
+    """
+    For one already-downloaded Landsat GeoTIFF with the old path/row filename:
+    look up system:time_start from GEE, write metadata (+ optional sidecar),
+    and rename to L#_YYYYMMDD_HHMMSS.tif.
+
+    Returns a result dict with keys: old_path, new_path, metadata, renamed.
+    """
+    stem = os.path.splitext(os.path.basename(tiff_path))[0]
+    satname, date, path_row = stem.split('_')
+    meta = legacy_landsat_utc_timestamp(tiff_path, initialize_ee=initialize_ee)
+
+    # Guard against false positives: a real HHMMSS suffix must not be treated as
+    # path/row. The reconstructed GEE scene's WRS path/row must match the suffix.
+    wrs = None
+    if meta.get(META_WRS_PATH) is not None and meta.get(META_WRS_ROW) is not None:
+        wrs = f"{int(meta[META_WRS_PATH]):03d}{int(meta[META_WRS_ROW]):03d}"
+    if wrs != path_row:
+        raise ValueError(
+            f'{os.path.basename(tiff_path)} suffix {path_row} is not WRS path/row '
+            f'for {meta.get(META_GEE_IMAGE_ID)} (got {wrs}); refusing to migrate'
+        )
+
+    ts = meta[META_ACQUISITION_TIME]
+    if ts == f'{date}_{path_row}':
+        # Path/row numerically equals the true clock time — still stamp metadata,
+        # but renaming is a no-op.
+        pass
+
+    new_name = f'{satname}_{ts}.tif'
+    new_path = os.path.join(os.path.dirname(tiff_path), new_name)
+    result = {
+        'old_path': tiff_path,
+        'new_path': new_path,
+        'metadata': meta,
+        'renamed': False,
+        'dry_run': dry_run,
+    }
+    if dry_run:
+        return result
+
+    target = tiff_path
+    if rename and os.path.abspath(tiff_path) != os.path.abspath(new_path):
+        if os.path.exists(new_path):
+            raise FileExistsError(f'Refusing to overwrite existing {new_path}')
+        os.rename(tiff_path, new_path)
+        old_sidecar = os.path.splitext(tiff_path)[0] + '.json'
+        if os.path.isfile(old_sidecar):
+            os.remove(old_sidecar)
+        target = new_path
+        result['renamed'] = True
+
+    write_geotiff_metadata(target, meta, write_sidecar_json=write_sidecar_json)
+    result['new_path'] = target
+    return result
+
+
+def migrate_legacy_landsat_directory(
+    directory: str,
+    dry_run: bool = False,
+    rename: bool = True,
+    write_sidecar_json: bool = True,
+    recursive: bool = True,
+) -> list:
+    """
+    Batch-migrate Landsat GeoTIFFs that still use the vestigial date_pathrow
+    filename convention. Looks up real UTC times from GEE (one call per file).
+
+    ``directory`` may be a sat folder (…/L8) or a sitename folder (…/sitename).
+    """
+    pattern = os.path.join(directory, '**', 'L[4-9]_*.tif') if recursive else os.path.join(directory, 'L[4-9]_*.tif')
+    candidates = sorted(glob(pattern, recursive=recursive))
+    # Skip single-band leftovers like .R.tif
+    candidates = [p for p in candidates if p.count('.') == 1]
+
+    results = []
+    need_init = True
+    for path in candidates:
+        if not is_legacy_landsat_file(path):
+            continue
+        try:
+            result = migrate_legacy_landsat_file(
+                path,
+                dry_run=dry_run,
+                rename=rename,
+                write_sidecar_json=write_sidecar_json,
+                initialize_ee=need_init,
+            )
+            need_init = False
+            results.append(result)
+            action = 'would rename' if dry_run else ('renamed' if result['renamed'] else 'updated')
+            print(f"  {action}: {os.path.basename(path)} → {os.path.basename(result['new_path'])}  "
+                  f"({result['metadata'].get(META_ACQUISITION_TIME)})")
+        except Exception as e:
+            print(f'  FAILED {os.path.basename(path)}: {type(e).__name__}: {e}')
+            results.append({'old_path': path, 'error': str(e)})
+    return results
 
 
 def convert_to_celsius(image_array, method='kelvin', **kwargs):
@@ -167,9 +512,18 @@ def get_res(ds):
             return abs(gt[1]), abs(gt[5]), ds.RasterXSize, ds.RasterYSize
 
 
-def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_original_files:bool=True, resample:bool=True, scale:bool=True):
+def combine_tiffs(
+    tiff_files: list,
+    output_path: str = None,
+    satname=None,
+    delete_original_files: bool = True,
+    resample: bool = True,
+    scale: bool = True,
+    scene_metadata: dict = None,
+    write_sidecar_json: bool = True,
+):
     """
-    This function gets the min and max pixel boundaries of a dataset
+    Combine single-band scene GeoTIFFs into one multi-band GeoTIFF.
 
     Arguments:
     ----------
@@ -177,18 +531,18 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
         list of tiff filenames NOTE they SHOULD all be for the same image (scene)
     output_path : str
         path to where the output combined tiff will be saved (if None then just same as the first tiff)
-    satname : 
-        None which mean it does generic minmax scaling but otherwise it does /10_000 for S2 (sentinel) and 
+    satname :
+        None which mean it does generic minmax scaling but otherwise it does /10_000 for S2 (sentinel) and
     delete_original_files : bool
         if True, then the single band files that were used to make the combined tiff will be delete
     resample : bool
-        if True, the image bands will be sharpened to 
+        if True, the image bands will be sharpened to
     scale : bool
         if True, convert -inf pixel values to 0
-    
-    Returns:
-    --------
-    tuple of four ints
+    scene_metadata : dict
+        optional acquisition / accuracy metadata written into the GeoTIFF (+ sidecar JSON)
+    write_sidecar_json : bool
+        if True and scene_metadata is set, also write ``<stem>.json`` next to the GeoTIFF
     """
     order = {'R': 0, 'G': 1, 'B': 2, 'NIR': 3, 'PAN': 4, 'UDM': 5, 'SWIR1':6, 'SWIR2':7, 'TIR':8}
     valid_suffixes = [f".{band}.tif" for band in order.keys()] # only want the bands included here to be combined
@@ -400,7 +754,10 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
         # close datasets to release resources -------------------------------------------------
         output_dataset.FlushCache()
         output_dataset = None # close output file
-        del output_dataset           
+        del output_dataset
+
+        if scene_metadata:
+            write_geotiff_metadata(output_path, scene_metadata, write_sidecar_json=write_sidecar_json)
 
     for i in range(len(datasets)):
         datasets[i].FlushCache()
@@ -451,46 +808,80 @@ def combine_tiffs(tiff_files:list, output_path:str=None, satname=None, delete_or
 
 def get_timestamp(fn, convert_format=False) -> str:
     """
-    returns timestamp st in this format YYYYMMDD_HHmmSS unless fn says original format
-    NOTE: takes the first of the timestamps for sentinel
+    Parse a timestamp token from a GEE image id or on-disk filename.
+
+    Sentinel-2 product ids embed real UTC sensing time
+    (``…/20151218T235455_…`` → ``20151218T235455``).
+
+    Landsat Collection 2 product ids are ``SENSOR_PPPRRR_YYYYMMDD`` — the six
+    digits are WRS path/row, **not** a clock time. Prefer
+    ``extract_scene_metadata`` / ``system:time_start`` for Landsat filenames.
+    This helper still returns ``PPPRRR_YYYYMMDD`` (or ``YYYYMMDD_PPPRRR`` when
+    ``convert_format=True``) so legacy path/row files keep working.
+
+    On-disk files already named ``SAT_YYYYMMDD_HHMMSS`` return that stamp when
+    ``convert_format=True``.
     """
     long_fn = fn
     if '/' in fn or '\\' in fn:
         # this means its a file path
         fn = os.path.basename(fn)
-            
+
     first_split = fn.split('_')
     satname = first_split[0]
     # print(satname)
-         
-    if satname.startswith('S') or 'S2' in long_fn or '_T' in fn:
-        # Sentinel is in this format S2_20191101T000241_20191101T000243_T56HLH.B where the first time is start of aquisition and the second is end of aquizition in utc time (e.i when its processed on the ground)
-        timestamp_str = fn.split('_')[1] # using start of image aquisition timestamp
-    elif satname.startswith('L') or 'LC' in fn:
-        # Landsat L7_LE07_089083_20191114.B where 08 is the hour and 2019 is year etc.
-        if len(first_split) == 4:
-            timestamp = first_split[2]
-        else:
-            timestamp = first_split[-2] # incase there is no satname in the fn
-        date = first_split[-1].split('.')[0]
-        timestamp_str = f'{timestamp}_{date}'   
 
+    # Already-standardized on-disk name: L8_20130327_102547.tif or S2_20151218_235455.tif
+    # (also matches vestigial Landsat date_pathrow names until they are migrated)
+    if len(first_split) >= 3 and _TIMESTAMP_RE.match(f'{first_split[1]}_{first_split[2].split(".")[0]}'):
+        return f'{first_split[1]}_{first_split[2].split(".")[0]}'
+
+    if satname.startswith('S') or 'S2' in long_fn or re.search(r'\d{8}T\d{6}', fn):
+        # Prefer the first YYYYMMDDTHHMMSS token (sensing start). Product ids may or
+        # may not include an S2_ prefix; never use the ground-processing stamp.
+        m = re.search(r'(\d{8}T\d{6})', fn)
+        if not m:
+            raise ValueError(f'No Sentinel sensing timestamp in {fn!r}')
+        timestamp_str = m.group(1)
+    elif satname.startswith('L') or 'LC' in fn or 'LT' in fn or 'LE' in fn:
+        # Landsat product / legacy name: six digits are WRS path/row, not HHMMSS
+        # e.g. LC08_089083_20130327 or L8_20130327_089083
+        if len(first_split) == 4:
+            # L8_LE07_089083_20191114-style
+            timestamp = first_split[2]
+            date = first_split[3].split('.')[0]
+        elif len(first_split) >= 3 and first_split[-1].split('.')[0].isdigit() and len(first_split[-1].split('.')[0]) == 8:
+            # LC08_089083_20130327 or L8_20130327_089083
+            a, b = first_split[-2], first_split[-1].split('.')[0]
+            if len(a) == 8 and a.isdigit():
+                # L8_YYYYMMDD_PPPRRR on-disk legacy
+                date, timestamp = a, b
+            else:
+                # SENSOR_PPPRRR_YYYYMMDD product id
+                timestamp, date = a, b
+        else:
+            timestamp = first_split[-2]
+            date = first_split[-1].split('.')[0]
+        timestamp_str = f'{timestamp}_{date}'
+    else:
+        raise ValueError(f'Unrecognized timestamp format in {fn!r}')
 
     if convert_format:
         timestamp_str = convert_raw_timestamp(timestamp_str, satname)
 
-    # print(date)
-    # print(timestamp)
     return timestamp_str
 
 
 def convert_raw_timestamp(timestamp_str, satname):
-    # this converts it to a standardized format
+    """Normalize raw GEE/id tokens to ``YYYYMMDD_HHMMSS`` (or date_pathrow for legacy Landsat)."""
+    if _TIMESTAMP_RE.match(timestamp_str):
+        return timestamp_str
 
     if satname.startswith('S') or 'T' in timestamp_str:
         date, time = timestamp_str.split('T')
         timestamp_str = f'{date}_{time}'
     elif satname.startswith('L'):
+        # Legacy / product-id form: PPPRRR_YYYYMMDD → YYYYMMDD_PPPRRR
         time, date = timestamp_str.split('_')
         timestamp_str = f'{date}_{time}'
     else:

@@ -229,24 +229,68 @@ def _image_save_dir(sitename, satname, data_dir=None, alternate_save_path=None):
     return os.path.join(root, 'sat_images', sitename, satname)
 
 
-def _combined_scene_path(sitename, satname, image_id, data_dir=None, alternate_save_path=None):
+def _combined_scene_path(sitename, satname, image_id, data_dir=None, alternate_save_path=None, timestamp_str=None):
     """Final per-scene multi-band GeoTIFF path written by download + combine."""
     sat_dir = _image_save_dir(
         sitename, satname, data_dir=data_dir, alternate_save_path=alternate_save_path
     )
-    timestamp_str = tiffutils.get_timestamp(image_id, convert_format=True)
+    if timestamp_str is None:
+        timestamp_str = tiffutils.get_timestamp(image_id, convert_format=True)
     return os.path.join(sat_dir, f'{satname}_{timestamp_str}.tif')
 
 
-def _scene_already_on_disk(sitename, satname, image_id, data_dir=None, alternate_save_path=None, min_bytes=10_000):
+def _legacy_landsat_scene_path(sitename, satname, image_id, data_dir=None, alternate_save_path=None):
+    """
+    Path used by the old Landsat naming convention: L8_YYYYMMDD_PPPRRR.tif
+    where PPPRRR is WRS path/row (not a clock time). Used only so already-
+    downloaded scenes are not re-fetched before migrate_legacy_landsat_*.
+    """
+    if not satname.startswith('L'):
+        return None
+    product = image_id.split('/')[-1]  # LC08_089083_20130327
+    parts = product.split('_')
+    if len(parts) < 3:
+        return None
+    path_row, date = parts[1], parts[2]
+    sat_dir = _image_save_dir(
+        sitename, satname, data_dir=data_dir, alternate_save_path=alternate_save_path
+    )
+    return os.path.join(sat_dir, f'{satname}_{date}_{path_row}.tif')
+
+
+def _scene_already_on_disk(
+    sitename,
+    satname,
+    image_id,
+    data_dir=None,
+    alternate_save_path=None,
+    min_bytes=10_000,
+    timestamp_str=None,
+):
     """True if a usable combined scene TIFF already exists (skip GEE re-fetch)."""
     path = _combined_scene_path(
-        sitename, satname, image_id, data_dir=data_dir, alternate_save_path=alternate_save_path
+        sitename,
+        satname,
+        image_id,
+        data_dir=data_dir,
+        alternate_save_path=alternate_save_path,
+        timestamp_str=timestamp_str,
     )
     try:
-        return os.path.isfile(path) and os.path.getsize(path) >= min_bytes
+        if os.path.isfile(path) and os.path.getsize(path) >= min_bytes:
+            return True
     except OSError:
-        return False
+        pass
+    # Vestigial Landsat date_pathrow names still count as on-disk
+    legacy = _legacy_landsat_scene_path(
+        sitename, satname, image_id, data_dir=data_dir, alternate_save_path=alternate_save_path
+    )
+    if legacy:
+        try:
+            return os.path.isfile(legacy) and os.path.getsize(legacy) >= min_bytes
+        except OSError:
+            return False
+    return False
 
 
 def _export_scale(satname, desired_scale=None):
@@ -298,7 +342,7 @@ def _bisect_lonlat_rect(s_min_lon, s_min_lat, s_max_lon, s_max_lat):
     )
 
 
-def _mosaic_raster_files(paths, final_path):
+def _mosaic_raster_files(paths, final_path, scene_metadata=None, write_sidecar_json=True):
     datasets = [rasterio.open(p) for p in paths]
     mosaic, transform = merge(datasets)
     meta = datasets[0].meta.copy()
@@ -317,6 +361,10 @@ def _mosaic_raster_files(paths, final_path):
         for i, desc in enumerate(descriptions, start=1):
             if desc:
                 dest.update_tags(i, name=desc)
+    if scene_metadata:
+        tiffutils.write_geotiff_metadata(
+            final_path, scene_metadata, write_sidecar_json=write_sidecar_json
+        )
     for p in paths:
         try:
             os.remove(p)
@@ -325,19 +373,48 @@ def _mosaic_raster_files(paths, final_path):
     return final_path
 
 
-def _combine_scene_band_files(sat_dir, satname, image_id):
+def _combine_scene_band_files(
+    sat_dir,
+    satname,
+    image_id,
+    timestamp_str=None,
+    scene_metadata=None,
+    write_sidecar_json=True,
+):
     """Combine leftover single-band tifs (including 15 m PAN) for one scene."""
-    timestamp_str = tiffutils.get_timestamp(image_id, convert_format=True)
+    if timestamp_str is None:
+        timestamp_str = tiffutils.get_timestamp(image_id, convert_format=True)
     fns = glob(os.path.join(sat_dir, f'{satname}_{timestamp_str}.*.tif'))
     rgb = [f for f in fns if f.endswith(('.R.tif', '.G.tif', '.B.tif'))]
     if not rgb:
         return False
     resample = satname in ('L7', 'L8', 'L9')
-    tiffutils.combine_tiffs(fns, satname=satname, resample=resample)
+    tiffutils.combine_tiffs(
+        fns,
+        satname=satname,
+        resample=resample,
+        scene_metadata=scene_metadata,
+        write_sidecar_json=write_sidecar_json,
+    )
     return True
 
 
-def download_large_AOI_in_seperate_tiles(sitename:str, satname:str, bands, aoi, image, image_id, size_error_str:str='', scale:int=None, combine_tiff_files:bool=True, data_dir=None, alternate_save_path=None):
+def download_large_AOI_in_seperate_tiles(
+    sitename: str,
+    satname: str,
+    bands,
+    aoi,
+    image,
+    image_id,
+    size_error_str: str = '',
+    scale: int = None,
+    combine_tiff_files: bool = True,
+    data_dir=None,
+    alternate_save_path=None,
+    timestamp_str=None,
+    scene_metadata=None,
+    write_sidecar_json=True,
+):
 
     if scale is None:
         scale = _export_scale(satname)
@@ -459,6 +536,9 @@ def download_large_AOI_in_seperate_tiles(sitename:str, satname:str, bands, aoi, 
                 combine_tiff_files=combine_tiff_files,
                 alternate_save_path=save_dir,
                 data_dir=data_dir,
+                timestamp_str=timestamp_str,
+                scene_metadata=scene_metadata,
+                write_sidecar_json=write_sidecar_json,
             )
         except GeeRetryableDownloadError:
             if depth < max_bisect_depth:
@@ -473,10 +553,10 @@ def download_large_AOI_in_seperate_tiles(sitename:str, satname:str, bands, aoi, 
 
     for rect in slices:
         download_rect_strip(rect, 0)
-       
 
     # --- Mosaic tile tifs into one final image (or one file per band) ---------
-    timestamp_str = tiffutils.get_timestamp(image_id, convert_format=True)
+    if timestamp_str is None:
+        timestamp_str = tiffutils.get_timestamp(image_id, convert_format=True)
     tile_glob = os.path.join(save_dir, f'{satname}_*{timestamp_str}*_tile_*.tif')
 
     if combine_tiff_files:
@@ -487,7 +567,12 @@ def download_large_AOI_in_seperate_tiles(sitename:str, satname:str, bands, aoi, 
         if not combined_tile_paths:
             raise RuntimeError(f"No combined tile tifs found for {timestamp_str} at {scale} m")
         final_path = os.path.join(save_dir, f'{satname}_{timestamp_str}.tif')
-        return _mosaic_raster_files(combined_tile_paths, final_path)
+        return _mosaic_raster_files(
+            combined_tile_paths,
+            final_path,
+            scene_metadata=scene_metadata,
+            write_sidecar_json=write_sidecar_json,
+        )
 
     written = []
     for band in _BAND_FILE_SUFFIXES:
@@ -495,7 +580,8 @@ def download_large_AOI_in_seperate_tiles(sitename:str, satname:str, bands, aoi, 
         if not band_tiles:
             continue
         final_path = os.path.join(save_dir, f'{satname}_{timestamp_str}.{band}.tif')
-        written.append(_mosaic_raster_files(band_tiles, final_path))
+        # Band tiles are intermediate; stamp metadata only on the final combined scene
+        written.append(_mosaic_raster_files(band_tiles, final_path, scene_metadata=None, write_sidecar_json=False))
     if not written:
         raise RuntimeError(f"No single-band tile tifs found for {timestamp_str} at {scale} m")
     return written
@@ -508,7 +594,19 @@ def _print_download_failure(satname, image_id, message):
     print(f"  Skipping this scene and continuing with the next download.")
 
 
-def download_single_image(sitename:str, satname:str, download_url, image_id=None, combine_tiff_files:bool=True, alternate_save_path=None, tile_number:int=None, data_dir=None):
+def download_single_image(
+    sitename: str,
+    satname: str,
+    download_url,
+    image_id=None,
+    combine_tiff_files: bool = True,
+    alternate_save_path=None,
+    tile_number: int = None,
+    data_dir=None,
+    timestamp_str=None,
+    scene_metadata=None,
+    write_sidecar_json=True,
+):
     imagery_downloaded = False
     response = _requests_get_with_retries(download_url, satname, image_id)
     if response is None:
@@ -530,63 +628,57 @@ def download_single_image(sitename:str, satname:str, download_url, image_id=None
         download_folder_satname = _image_save_dir(sitename, satname, data_dir=data_dir, alternate_save_path=alternate_save_path)
         os.makedirs(download_folder_satname, exist_ok=True) # make sure the download folder exists before saving the file
 
-        # change zip filename to include the satname at the beginning and avoid nested folders
-        # image_id_fn = image_id.split("/")[-1]
-        image_id_fn = tiffutils.get_timestamp(image_id, convert_format=False)
-        # print(image_id_fn)
-
+        # Match GEE zip member names (product-id based), independent of our on-disk UTC stamp
+        image_id_fn = image_id.split('/')[-1] if image_id else tiffutils.get_timestamp(image_id, convert_format=False)
 
         zip_filename = os.path.join(download_folder_satname, f'{image_id_fn}_image.zip')
-        
+
         with open(zip_filename, 'wb') as f:
             f.write(response.content)
-        # print(f"File downloaded successfully as {zip_filename}")
 
         # Unzip the file into the download folder
         with zipfile.ZipFile(zip_filename, 'r') as zip_ref:
-            zip_ref.extractall(download_folder_satname)  # Extract directly into the download folder
-        # print(f"File unzipped successfully into {download_folder_satname}")
+            zip_ref.extractall(download_folder_satname)
 
-        # prepend satelite name to file names and replace channel with the actual channel
-        this_image_component_fns = [] # these are each of the band names for the 
-        
-        # go through each of the bands
-        timestamp_str = tiffutils.get_timestamp(image_id, convert_format=True)
+        this_image_component_fns = []
+
+        if timestamp_str is None:
+            if scene_metadata and scene_metadata.get(tiffutils.META_ACQUISITION_TIME):
+                timestamp_str = scene_metadata[tiffutils.META_ACQUISITION_TIME]
+            else:
+                timestamp_str = tiffutils.get_timestamp(image_id, convert_format=True)
+
         tiff_fns = glob(os.path.join(download_folder_satname, f'*{image_id_fn}*'))
         for file_path in tiff_fns:
             if file_path.endswith('.zip'): continue # This is the zip file we took them out of
             if 'tile' in file_path: continue # this means its already been processed (the only possibility of this is if there are multiple tiles for same image timestamp)
             short_fn = os.path.basename(file_path)
-            # print(short_fn)
             period_split = short_fn.split('.')
             band = period_split[1] # last one is file extention
-            # short_fn_no_band = period_split[0] # removes extention and band but has the defaultfilename version
             short_fn_no_band = timestamp_str
             if not tile_number is None:
                 short_fn_no_band = f'{short_fn_no_band}_tile_{tile_number}'
-            # print(band)
             try:
                 short_fn = f'{short_fn_no_band}.{channel_name_to_band(channel_name=band, satname=satname, reverse=True)}'
             except ValueError:
-                # For some satellites it may just 
+                # For some satellites it may just
                 short_fn = f'{short_fn_no_band}.{band}' # names are already set to have the correct band name so no need reverse it
-            # print(short_fn)
 
             new_filename = os.path.join(os.path.dirname(file_path), f"{satname}_{short_fn}.tif")
 
-            if not file_path == new_filename: 
+            if not file_path == new_filename:
                 if os.path.exists(new_filename):
                     # this mostlikely means this data was already downloaded
                     os.remove(new_filename) # NOTE it will now get overridden
                 os.rename(file_path, new_filename) # NOTE done by resampling for landsat
-            
+
             this_image_component_fns.append(new_filename) # save band file to list so fns can all be combined
 
 
         os.remove(zip_filename) # remove zip file
         imagery_downloaded = True # if any imagery is downloaded
         # NOTE usually PAN is actually downloaded seperately at a different res NOTE this can become and issue with other bands down the line
-       
+
         PAN_fns = glob(os.path.join(download_folder_satname, f"{satname}_{timestamp_str}.PAN.tif"))
         if len(PAN_fns)>= 1:
             pan_fn = PAN_fns[0]
@@ -596,8 +688,11 @@ def download_single_image(sitename:str, satname:str, download_url, image_id=None
             _print_download_failure(satname, image_id, 'no image component files after unzip')
             return False
         if combine_tiff_files == True:
-            # print(this_image_component_fns)
-            tiffutils.combine_tiffs(tiff_files=this_image_component_fns) # for each image combine band tiffs into one tiff file
+            tiffutils.combine_tiffs(
+                tiff_files=this_image_component_fns,
+                scene_metadata=scene_metadata,
+                write_sidecar_json=write_sidecar_json,
+            )
     except GeeRetryableDownloadError:
         raise
     except Exception as e:
@@ -605,9 +700,23 @@ def download_single_image(sitename:str, satname:str, download_url, image_id=None
         return False
 
     return imagery_downloaded
-    
 
-def _try_tiled_export(sitename, satname, bands, aoi, image, image_id, size_error_str, scale, data_dir=None, alternate_save_path=None):
+
+def _try_tiled_export(
+    sitename,
+    satname,
+    bands,
+    aoi,
+    image,
+    image_id,
+    size_error_str,
+    scale,
+    data_dir=None,
+    alternate_save_path=None,
+    timestamp_str=None,
+    scene_metadata=None,
+    write_sidecar_json=True,
+):
     print(f'downloading scene in seperate tiles ({scale} m, {len(bands)} band(s)) with download_large_AOI_in_seperate_tiles()')
     try:
         download_large_AOI_in_seperate_tiles(
@@ -622,6 +731,9 @@ def _try_tiled_export(sitename, satname, bands, aoi, image, image_id, size_error
             combine_tiff_files=False,
             data_dir=data_dir,
             alternate_save_path=alternate_save_path,
+            timestamp_str=timestamp_str,
+            scene_metadata=scene_metadata,
+            write_sidecar_json=write_sidecar_json,
         )
         return True
     except Exception as tile_e:
@@ -641,6 +753,9 @@ def _download_or_tile_export(
     data_dir=None,
     alternate_save_path=None,
     region=None,
+    timestamp_str=None,
+    scene_metadata=None,
+    write_sidecar_json=True,
 ):
     """Full-AOI download for one export; tile only this export (at this scale) on size/503 errors.
 
@@ -667,6 +782,8 @@ def _download_or_tile_export(
             return _try_tiled_export(
                 sitename, satname, bands, aoi, image, image_id, str(e),
                 scale=scale, data_dir=data_dir, alternate_save_path=alternate_save_path,
+                timestamp_str=timestamp_str, scene_metadata=scene_metadata,
+                write_sidecar_json=write_sidecar_json,
             )
         _print_download_failure(satname, image_id, f'getDownloadURL {scale}m failed ({type(e).__name__}): {e}')
         return False
@@ -680,6 +797,9 @@ def _download_or_tile_export(
             alternate_save_path=alternate_save_path,
             data_dir=data_dir,
             combine_tiff_files=combine_tiff_files,
+            timestamp_str=timestamp_str,
+            scene_metadata=scene_metadata,
+            write_sidecar_json=write_sidecar_json,
         ))
     except GeeRetryableDownloadError as e:
         print(f'  {satname} {image_id} {scale}m GEE memory/unavailable after retries')
@@ -687,16 +807,31 @@ def _download_or_tile_export(
         return _try_tiled_export(
             sitename, satname, bands, aoi, image, image_id, str(e),
             scale=scale, data_dir=data_dir, alternate_save_path=alternate_save_path,
+            timestamp_str=timestamp_str, scene_metadata=scene_metadata,
+            write_sidecar_json=write_sidecar_json,
         )
 
 
-def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, specific_download_path=None, polygon=None, desired_scale:int=None, satnames:list=['L4', 'L5', 'L7', 'L8', 'L9', 'S2'], proccess_downloads:bool=True, specific_band_requests:dict=None, max_cloud_percent:int=20):
+def retrieve_imagery(
+    sitename: str,
+    start_date: str,
+    end_date: str,
+    data_dir=None,
+    specific_download_path=None,
+    polygon=None,
+    desired_scale: int = None,
+    satnames: list = ['L4', 'L5', 'L7', 'L8', 'L9', 'S2'],
+    proccess_downloads: bool = True,
+    specific_band_requests: dict = None,
+    max_cloud_percent: int = 20,
+    write_sidecar_json: bool = True,
+):
     """
     Download imagery for a given site (if no polygon loads sitename file)
 
     :param sitename: str the name of the site (used for where the images are downloaded)
-    :param start_date: str "YYY-MM-DD" 
-    :param end_date: str "YYY-MM-DD" 
+    :param start_date: str "YYY-MM-DD"
+    :param end_date: str "YYY-MM-DD"
     :param data_dir: str directory where sat_images/<sitename> is held. NOTE do not include sat_images or sitename in data_dir
     :param specific_download_path: str if you have a specific place you want the image downloaded not using sitename or anything use this
     :param polygon: 2d list [longitude1, latitude1], [longitude2, latitude2], [longitude3, latitude3], [longitude4, latitude4]] NOTE does not need to be a rectangle
@@ -705,7 +840,15 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
     :param proccess_downloads: bool if True then run tiffutils.clean_up_gee_downloads
     :param specific_band_requests: dict with satname and then what bands are requested if not None then this overwrites satnames
     :param max_cloud_percent: int (or float) max percent of the image that can be covered by clouds
+    :param write_sidecar_json: bool if True write ``<scene>.json`` next to each GeoTIFF with
+        acquisition time (UTC), GEE id, and geometric RMSE when available
     NOTE the combine bands function in tiffutils will only combine RGB NIR PAN and UDM all others will be left as their own bands
+
+    Filenames use real UTC sensing time for all missions (``SAT_YYYYMMDD_HHMMSS.tif``).
+    Landsat Collection 2 product ids only carry date + WRS path/row — time comes from
+    ``system:time_start``. Already-downloaded Landsat files using the old
+    ``L8_YYYYMMDD_PPPRRR`` convention are detected as on-disk (not re-downloaded);
+    run ``migrate_legacy_landsat_directory`` to rename them and stamp metadata.
     """
 
     imagery_downloaded=False
@@ -802,10 +945,16 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
             n_images = len(features)
             if n_images > 0:
                 skipped = 0
-                for image in features:
-                    # Get the ID of the image to download. This is each image not each band 
-                    image_id = image['id'] # something like this: COPERNICUS/S2_HARMONIZED/20250712T153559_20250712T153728_T19TCG 
-                    # print(f"Processing image: {image_id}")
+                for feature in features:
+                    # Get the ID of the image to download. This is each image not each band
+                    image_id = feature['id'] # something like this: COPERNICUS/S2_HARMONIZED/20250712T153559_20250712T153728_T19TCG
+                    props = feature.get('properties') or {}
+                    try:
+                        scene_metadata = tiffutils.extract_scene_metadata(props, satname, image_id)
+                    except ValueError as e:
+                        _print_download_failure(satname, image_id, str(e))
+                        continue
+                    timestamp_str = scene_metadata[tiffutils.META_ACQUISITION_TIME]
 
                     if _scene_already_on_disk(
                         sitename,
@@ -813,6 +962,7 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                         image_id,
                         data_dir=data_dir,
                         alternate_save_path=specific_download_path,
+                        timestamp_str=timestamp_str,
                     ):
                         skipped += 1
                         imagery_downloaded = True
@@ -837,6 +987,9 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                             region=aoi_region,
                             data_dir=data_dir,
                             alternate_save_path=specific_download_path,
+                            timestamp_str=timestamp_str,
+                            scene_metadata=scene_metadata,
+                            write_sidecar_json=write_sidecar_json,
                         )
                         if pan_band is not None:
                             if _download_or_tile_export(
@@ -855,7 +1008,14 @@ def retrieve_imagery(sitename:str, start_date:str, end_date:str, data_dir=None, 
                             ):
                                 imagery_downloaded = True
                         # If MS was tiled as single-band files, PAN is already on disk as .PAN.tif
-                        _combine_scene_band_files(sat_save_dir, satname, image_id)
+                        _combine_scene_band_files(
+                            sat_save_dir,
+                            satname,
+                            image_id,
+                            timestamp_str=timestamp_str,
+                            scene_metadata=scene_metadata,
+                            write_sidecar_json=write_sidecar_json,
+                        )
                     except Exception as e:
                         _print_download_failure(satname, image_id, f'{type(e).__name__}: {e}')
                         continue
